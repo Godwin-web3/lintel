@@ -9,10 +9,8 @@ Conditional settlement on Zcash using two-party adaptor signatures.
 1. Seller generates a single-use nonce and publishes only `R_a`.
 2. Buyer computes `s_b = r_b + c·sk_b` from `R_a` (never sees `r_a`).
 3. Seller checks the buyer's knowledge proof and `s_b·G == R_b + c·vk_b`, then sends `s_a`.
-4. Buyer checks `s_a·G == R_a + c·(vk_a + α·G)` before completing.
+4. Buyer recomputes `R = R_a + R_b + T`, checks `vk_hex` against `rk`, and verifies `s_a` before completing.
 5. Seller extracts `t = s − s_a − s_b` without learning `sk_b`.
-
-Proofs of knowledge use a separate personalization domain (`Lintel_PoK_v1`).
 
 ## Reproduce
 
@@ -27,14 +25,14 @@ cargo run --bin lintel-cli -- demo
 
 - Nonce is generated inside the seller and consumed on use.
 - Buyer computes its partial from `R_a` alone.
-- Buyer verifies `s_a` before completing.
+- `verify_presig` recomputes `R` and checks `vk_hex` against `rk`.
 - Seller proves knowledge of `sk_a`; proofs use a separate domain.
 - Completed signature verifies under `rk`.
 - Seller extracts `t` without `sk_b`.
-- MinValue circuit: gated running sum so a value below `min` cannot pass.
-- `commit_value_txid` binds the value and txid; a different txid produces a different commitment.
+- MinValue circuit: in-circuit commitment `C = value + blind + txid` is a public input; gated running sum.
 
 ## Not yet done
 
-- reddsa SpendAuth cross-check (API mismatch with current reddsa version).
+- Poseidon commitment (current commitment is linear).
+- reddsa SpendAuth cross-check.
 - Testnet transaction with this flow.
