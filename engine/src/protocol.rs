@@ -1,7 +1,7 @@
 //! Lintel two-party adaptor.
 //! Nonce is generated inside Seller and is single-use.
 //! Buyer computes s_b from R_a (never sees r_a).
-//! PoK uses a separate personalization domain.
+//! verify_presig recomputes R and checks vk_hex against rk.
 
 use pasta_curves::pallas::{Point, Scalar};
 use group::{Group, GroupEncoding};
@@ -21,14 +21,12 @@ fn challenge(r: &[u8; 32], vk: &[u8; 32], msg: &[u8]) -> Scalar {
     let arr: [u8; 64] = h.as_bytes().try_into().unwrap();
     <Scalar as FromUniformBytes<64>>::from_uniform_bytes(&arr)
 }
-
 fn pok_challenge(r: &[u8; 32], vk: &[u8; 32], label: &[u8]) -> Scalar {
     let h = Params::new().hash_length(64).personal(b"Lintel_PoK_v1")
         .to_state().update(r).update(vk).update(label).finalize();
     let arr: [u8; 64] = h.as_bytes().try_into().unwrap();
     <Scalar as FromUniformBytes<64>>::from_uniform_bytes(&arr)
 }
-
 fn base() -> Point { Point::from_bytes(&ORCHARD_BASEPOINT).unwrap() }
 fn session_label(a: Point, b: Point, session: &[u8]) -> Vec<u8> {
     let mut v = Vec::new();
@@ -121,23 +119,35 @@ impl Buyer {
         let c = challenge(&r_joint.to_bytes(), &rk.to_bytes(), sighash);
         BuyerPartial { r_b: r_b_point, s_b: r_b + c * self.sk_b, t_point: self.t_point() }
     }
-    pub fn verify_presig(&self, pre: &PreSignature, r_a_point: Point, vk_a: Point, alpha: Scalar) -> bool {
+    /// Recomputes R = R_a + R_b + T and checks vk_hex against rk.
+    pub fn verify_presig(&self, pre: &PreSignature, r_a_point: Point, r_b_point: Point, vk_a: Point, alpha: Scalar) -> bool {
         let s_a_bytes = match hex::decode(&pre.s_a_hex) {
             Ok(b) if b.len() == 32 => b,
             _ => return false,
         };
-        let s_a = Scalar::from_repr(s_a_bytes.try_into().unwrap()).unwrap();
-        let rk = vk_a + self.vk_b + base() * alpha;
-        let msg = match hex::decode(&pre.sighash_hex) {
-            Ok(m) => m,
+        let s_a_arr: [u8; 32] = match s_a_bytes.try_into() {
+            Ok(a) => a,
             Err(_) => return false,
         };
+        let s_a = Scalar::from_repr(s_a_arr).unwrap();
+        let rk = vk_a + self.vk_b + base() * alpha;
+        let r_expected = r_a_point + r_b_point + self.t_point();
         let r_bytes = match hex::decode(&pre.r_hex) {
             Ok(b) if b.len() == 32 => b,
             _ => return false,
         };
         let mut r_arr = [0u8; 32];
         r_arr.copy_from_slice(&r_bytes);
+        if r_arr != r_expected.to_bytes() { return false; }
+        let vk_bytes = match hex::decode(&pre.vk_hex) {
+            Ok(b) if b.len() == 32 => b,
+            _ => return false,
+        };
+        if vk_bytes.as_slice() != rk.to_bytes().as_ref() { return false; }
+        let msg = match hex::decode(&pre.sighash_hex) {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
         let c = challenge(&r_arr, &rk.to_bytes(), &msg);
         base() * s_a == r_a_point + (vk_a + base() * alpha) * c
     }
@@ -199,7 +209,7 @@ mod tests {
         let pok_a = seller.prove_knowledge(buyer.vk_b, session);
         assert!(verify_knowledge(seller.vk_a, &pok_a, seller.vk_a, buyer.vk_b, session));
         let pre = seller.pre_sign(buyer.vk_b, &partial, sighash, session, &pok_b, alpha).unwrap();
-        assert!(buyer.verify_presig(&pre, r_a_point, seller.vk_a, alpha));
+        assert!(buyer.verify_presig(&pre, r_a_point, partial.r_b, seller.vk_a, alpha));
         let sig = buyer.complete(&pre, &partial).unwrap();
         assert!(buyer.verify_completed(&pre, &sig));
         let s = Scalar::from_repr(sig[32..].try_into().unwrap()).unwrap();
