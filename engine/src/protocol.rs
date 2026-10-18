@@ -5,7 +5,7 @@
 use pasta_curves::pallas::{Point, Scalar};
 use group::{Group, GroupEncoding};
 use ff::{Field, PrimeField, FromUniformBytes};
-use rand::rng;
+use rand::thread_rng as rng;
 use blake2b_simd::Params;
 use serde::{Serialize, Deserialize};
 
