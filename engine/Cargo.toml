@@ -17,3 +17,7 @@ halo2_proofs = "0.3"
 [lib]
 name = "lintel"
 path = "src/lib.rs"
+
+[[bin]]
+name = "lintel-cli"
+path = "src/bin/lintel-cli.rs"
