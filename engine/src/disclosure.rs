@@ -114,6 +114,17 @@ fn txid_to_fe(hex_str: &str) -> F {
     F::from_repr(b).unwrap()
 }
 
+/// Public commitment that binds value and txid.
+/// C = H(value || txid). A different txid produces a different commitment.
+pub fn commit_value_txid(value: u64, txid: &[u8; 32]) -> [u8; 32] {
+    use blake2b_simd::Params;
+    let mut v = value.to_le_bytes().to_vec();
+    v.extend_from_slice(txid);
+    let h = Params::new().hash_length(32).personal(b"Lintel_Commit")
+        .to_state().update(&v).finalize();
+    h.as_bytes().try_into().unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +142,12 @@ mod tests {
         let txid = txid_to_fe("51c6daaf0aba583cfcfed9a928a53d22e5f5f7c3f97db71935a0b6d4387d02b8");
         let circuit = MinValueCircuit { value: 1, min: 1_000_000_000, txid };
         assert!(MockProver::run(8, &circuit, vec![vec![F::from(1_000_000_000u64)], vec![txid]]).is_err());
+    }
+
+    #[test]
+    fn commitment_binds_txid() {
+        let txid1 = [1u8; 32];
+        let txid2 = [2u8; 32];
+        assert_ne!(commit_value_txid(1000, &txid1), commit_value_txid(1000, &txid2));
     }
 }
