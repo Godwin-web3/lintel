@@ -1,31 +1,37 @@
 # Lintel
 
-Conditional settlement on Zcash.
+Conditional settlement on Zcash using two-party adaptor signatures.
 
-A two-party payment where the seller creates an adaptor pre-signature and the buyer completes it only after the condition is met. An adversary without the secret cannot spend. Selective disclosure lets a party prove one fact without revealing the note.
+## Roles
 
-## Status
+- **Seller** holds only `sk_a`. Creates an adaptor pre-signature given `T = t·G`.
+- **Buyer** holds only `sk_b` and the secret `t`. Verifies the pre-signature, then completes it.
+- `T` is the only value shared before completion. Neither party can spend alone.
 
-Testnet. Three adaptor-enabled PCZT spends have been mined. A Halo 2 selective disclosure circuit (MinValue and InvoiceHash, bound to a txid) passes MockProver.
+## Reproduce (60 seconds)
 
-## What is here
+```bash
+cd engine
+cargo test --lib protocol::tests
+```
 
-- `engine/` — Rust crate with the two-role adaptor flow, CLI, and selective disclosure circuit
-- `web/` — website and local server that wraps the CLI
-- `docs/` — settlement spec and package notes
+Expected: 2 tests pass (roundtrip + adversary cannot complete).
 
-## Evidence
+## What is verified
 
-| Description | txid | Height |
-|-------------|------|--------|
-| Single-key adaptor | `77b82ea5167c617a4533c52a8263435a95e767de7e695f9953db00d524983427` | 4,503,051 |
-| Two-party adaptor | `f61ce7bbb0f2a3a1ba11eb28d068bd1f6bda09428f67be8baf2ac7dcd88a85bd` | 4,503,072 |
-| Two-role settlement | `51c6daaf0aba583cfcfed9a928a53d22e5f5f7c3f97db71935a0b6d4387d02b8` | 4,504,858 |
+- Pre-signature verification: `s_a·G == R' − T + c·vk_a`
+- Secret extraction: seller recovers `t` from the completed signature
+- Adversary without `t` cannot produce a signature that extracts the correct secret
+- Message signed is the transaction sighash
+
+## Testnet evidence
+
+See `docs/evidence.md`. Four adaptor-enabled spends have been accepted on Zcash testnet.
 
 ## Not claimed
 
-Fully trustless under every adversarial condition. An exchange between two independently funded parties. A production range-check lookup or full Orchard note path inside the circuit. Mainnet.
+Fully trustless under every adversarial condition. An exchange between two independently funded parties. A production range-check lookup. Mainnet.
 
 ## Known dependency
 
-The working PCZT path required a local patch to the NU7 branch ID (`0x77190ad9`) because the published `zcash_protocol` crate still uses a placeholder.
+The PCZT broadcast path required a local patch to the NU7 branch ID (`0x77190ad9`).
