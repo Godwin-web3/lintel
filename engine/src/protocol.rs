@@ -1,6 +1,7 @@
 //! Lintel two-party adaptor protocol.
 //! Seller holds only sk_a. Buyer holds only sk_b and t.
 //! Joint vk = vk_a + vk_b. Both parties use c = H(R' || vk || m).
+//! Each party can prove knowledge of its scalar.
 
 use pasta_curves::pallas::{Point, Scalar};
 use group::{Group, GroupEncoding};
@@ -38,6 +39,9 @@ pub struct PreSignature {
     pub sighash_hex: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct KnowledgeProof { pub r_point: Point, pub s: Scalar }
+
 impl Seller {
     pub fn new() -> Self {
         let mut rng = rng();
@@ -59,6 +63,13 @@ impl Seller {
             t_point_hex: hex::encode(t_point.to_bytes()),
             sighash_hex: hex::encode(sighash),
         }
+    }
+    pub fn prove_knowledge(&self) -> KnowledgeProof {
+        let mut rng = rng();
+        let k = Scalar::random(&mut rng);
+        let r_point = base() * k;
+        let c = challenge(&r_point.to_bytes(), &self.vk_a.to_bytes(), b"pok-sk-a");
+        KnowledgeProof { r_point, s: k + c * self.sk_a }
     }
 }
 
@@ -103,6 +114,14 @@ impl Buyer {
         let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &msg);
         base() * s == rp + vk * c
     }
+
+    pub fn prove_knowledge(&self) -> KnowledgeProof {
+        let mut rng = rng();
+        let k = Scalar::random(&mut rng);
+        let r_point = base() * k;
+        let c = challenge(&r_point.to_bytes(), &self.vk_b.to_bytes(), b"pok-sk-b");
+        KnowledgeProof { r_point, s: k + c * self.sk_b }
+    }
 }
 
 pub fn extract_t(pre: &PreSignature, sig: &[u8; 64], sk_b: Scalar) -> Scalar {
@@ -113,6 +132,11 @@ pub fn extract_t(pre: &PreSignature, sig: &[u8; 64], sk_b: Scalar) -> Scalar {
     let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &msg);
     let s = Scalar::from_repr(sig[32..].try_into().unwrap()).unwrap();
     s - s_a - c * sk_b
+}
+
+pub fn verify_knowledge(vk: Point, proof: &KnowledgeProof, label: &[u8]) -> bool {
+    let c = challenge(&proof.r_point.to_bytes(), &vk.to_bytes(), label);
+    base() * proof.s == proof.r_point + vk * c
 }
 
 #[cfg(test)]
@@ -137,5 +161,18 @@ mod tests {
         fake.sk_b = buyer.sk_b;
         fake.vk_b = buyer.vk_b;
         assert!(!buyer.verify_completed(&pre, &fake.complete(&pre)));
+    }
+    #[test]
+    fn both_parties_prove_knowledge() {
+        let seller = Seller::new();
+        let buyer = Buyer::new();
+        assert!(verify_knowledge(seller.vk_a, &seller.prove_knowledge(), b"pok-sk-a"));
+        assert!(verify_knowledge(buyer.vk_b, &buyer.prove_knowledge(), b"pok-sk-b"));
+    }
+    #[test]
+    fn cannot_prove_for_another_key() {
+        let seller = Seller::new();
+        let other = Seller::new();
+        assert!(!verify_knowledge(other.vk_a, &seller.prove_knowledge(), b"pok-sk-a"));
     }
 }
