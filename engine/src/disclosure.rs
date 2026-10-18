@@ -1,5 +1,5 @@
 //! MinValue circuit: value = min + diff, and diff equals the weighted sum of boolean bits.
-//! The final running sum is copy-constrained to diff, so a value below min cannot pass.
+//! 64-bit range. Final running sum is copy-constrained to diff.
 
 use ff::{Field, PrimeField};
 use halo2_proofs::{
@@ -9,7 +9,7 @@ use halo2_proofs::{
 };
 use pasta_curves::pallas::Base as F;
 
-const DIFF_BITS: usize = 32;
+const DIFF_BITS: usize = 64;
 
 #[derive(Clone)]
 struct Config {
