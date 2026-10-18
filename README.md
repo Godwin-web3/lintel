@@ -23,8 +23,6 @@ cargo test --lib disclosure::tests
 cargo run --bin lintel-cli -- demo
 ```
 
-Expected: protocol tests pass, disclosure tests pass (including value-below-min failure), demo prints all three `true`.
-
 ## What is verified
 
 - Nonce is generated inside the seller and consumed on use.
@@ -33,10 +31,10 @@ Expected: protocol tests pass, disclosure tests pass (including value-below-min 
 - Seller proves knowledge of `sk_a`; proofs use a separate domain.
 - Completed signature verifies under `rk`.
 - Seller extracts `t` without `sk_b`.
-- MinValue circuit: each running-sum row is gated (`r_cur = 2·r_prev + bit`), so a value below `min` cannot pass.
+- MinValue circuit: gated running sum so a value below `min` cannot pass.
+- `commit_value_txid` binds the value and txid; a different txid produces a different commitment.
 
 ## Not yet done
 
-- Poseidon commitment binding the value and txid.
-- reddsa SpendAuth cross-check.
+- reddsa SpendAuth cross-check (API mismatch with current reddsa version).
 - Testnet transaction with this flow.
