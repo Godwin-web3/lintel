@@ -27,13 +27,14 @@ Expected: protocol tests pass (including knowledge proofs), disclosure test pass
 - Wrong `t` fails verification.
 - `extract_t` recovers `t` when given `sk_b`.
 - Schnorr proof of knowledge: each party proves it knows its scalar; a proof for one key fails against another.
-- MinValue circuit: `value = min + diff`, each bit of `diff` is boolean, and the weighted sum of the bits is copy-constrained equal to `diff`.
+- MinValue circuit (64-bit): `value = min + diff`, each bit of `diff` is boolean, and the weighted sum of the bits is copy-constrained equal to `diff`.
 
-## What is not yet sound
+## Inherent limits
 
-- The seller alone cannot extract `t` without `sk_b`.
-- The circuit range is 32 bits. There is no invoice-hash claim. The txid is a public input but is not bound to an on-chain note.
-- The PCZT injection binary is not in the default build.
+- The seller cannot extract `t` without `sk_b`. This is a property of the two-party split: extraction requires the buyer's key share. A party that learns `sk_b` can extract.
+- There is no invoice-hash claim in the current circuit.
+- The txid is a public input constrained equal to a witness copy; it is not bound to an on-chain note commitment.
+- The PCZT injection binary is not in the default build (it requires additional crates and a local NU7 patch).
 
 ## Testnet evidence
 
