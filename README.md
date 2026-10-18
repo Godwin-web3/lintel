@@ -19,9 +19,11 @@ Proofs of knowledge use a separate personalization domain (`Lintel_PoK_v1`).
 ```bash
 cd engine
 cargo test --lib protocol::tests
+cargo test --lib disclosure::tests
+cargo run --bin lintel-cli -- demo
 ```
 
-Expected: full flow with nonzero alpha passes, nonce is single-use, rogue proof is rejected.
+Expected: protocol tests pass, disclosure tests pass (including value-below-min failure), demo prints all three `true`.
 
 ## What is verified
 
@@ -31,10 +33,10 @@ Expected: full flow with nonzero alpha passes, nonce is single-use, rogue proof 
 - Seller proves knowledge of `sk_a`; proofs use a separate domain.
 - Completed signature verifies under `rk`.
 - Seller extracts `t` without `sk_b`.
+- MinValue circuit: each running-sum row is gated (`r_cur = 2·r_prev + bit`), so a value below `min` cannot pass.
 
 ## Not yet done
 
-- Disclosure circuit running-sum gate and Poseidon commitment.
+- Poseidon commitment binding the value and txid.
 - reddsa SpendAuth cross-check.
-- CLI updated to the new API.
 - Testnet transaction with this flow.
