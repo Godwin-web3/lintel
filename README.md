@@ -13,28 +13,30 @@ Conditional settlement on Zcash using two-party adaptor signatures.
 ```bash
 cd engine
 cargo test --lib protocol::tests
+cargo test --lib disclosure::tests
 cargo run --bin lintel-cli -- demo
 ```
 
-Expected: both tests pass; the demo prints `presig_ok:true` and `completed_ok:true`.
+Expected: protocol tests pass, disclosure test passes, demo prints `presig_ok:true` and `completed_ok:true`.
 
 ## What is verified
 
 - Pre-signature checks under the joint key.
 - Completed signature verifies under the joint key (`s·G == R' + c·vk`).
 - Wrong `t` fails verification.
-- `extract_t` recovers `t` when given `sk_b` (the buyer, or a party that learns it).
+- `extract_t` recovers `t` when given `sk_b`.
+- MinValue circuit: `value = min + diff`, each bit of `diff` is boolean, and the weighted sum of the bits is copy-constrained equal to `diff`. A value below `min` cannot pass.
 
 ## What is not yet sound
 
 - The seller alone cannot extract `t` without `sk_b`.
 - No proof of knowledge on key shares (a buyer could choose `vk_b` to cancel `vk_a`).
-- The Halo 2 circuit checks bits are boolean but does not yet constrain them to sum to `diff`. A value below `min` can still pass. The range is 32 bits. The invoice claim checks equality with a public value rather than a hash. The txid is a public input but is not cryptographically bound to the witness.
-- The PCZT injection binary is not in the default build (it requires `orchard` and `pczt` crates and a local NU7 patch).
+- The circuit range is 32 bits. There is no invoice-hash claim in the current circuit (the previous equality check was removed). The txid is a public input constrained equal to a witness copy, but is not bound to an on-chain note.
+- The PCZT injection binary is not in the default build.
 
 ## Testnet evidence
 
-See `docs/evidence.md`. Four adaptor-enabled spends have been mined on Zcash testnet. Those transactions used a separate harness; the code in this repo is the cleaned protocol and does not by itself reproduce the broadcasts.
+See `docs/evidence.md`. Four adaptor-enabled spends have been mined on Zcash testnet.
 
 ## Known dependency
 
