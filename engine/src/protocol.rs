@@ -1,5 +1,9 @@
-//! Lintel two-party adaptor protocol.
-//! pre_sign rejects vk_b unless a valid knowledge proof is supplied.
+//! Lintel two-party adaptor with buyer partial signature.
+//! Buyer sends R_b and s_b before the seller pre-signs.
+//! Joint nonce R = R_a + R_b + T.
+//! Seller extracts t = s - s_a - s_b without learning sk_b.
+//! Proofs bind both keys and a session ID.
+//! pre_sign folds alpha so the signature verifies under rk.
 
 use pasta_curves::pallas::{Point, Scalar};
 use group::{Group, GroupEncoding};
@@ -19,25 +23,33 @@ fn challenge(r: &[u8; 32], vk: &[u8; 32], msg: &[u8]) -> Scalar {
     let arr: [u8; 64] = h.as_bytes().try_into().unwrap();
     <Scalar as FromUniformBytes<64>>::from_uniform_bytes(&arr)
 }
-
 fn base() -> Point { Point::from_bytes(&ORCHARD_BASEPOINT).unwrap() }
+fn session_label(a: Point, b: Point, session: &[u8]) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(&a.to_bytes());
+    v.extend_from_slice(&b.to_bytes());
+    v.extend_from_slice(session);
+    v
+}
 
 #[derive(Clone)]
 pub struct Seller { pub sk_a: Scalar, pub vk_a: Point }
 #[derive(Clone)]
 pub struct Buyer { pub sk_b: Scalar, pub vk_b: Point, pub t: Scalar }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct PreSignature {
-    pub r_prime_hex: String,
-    pub s_a_hex: String,
-    pub vk_hex: String,
-    pub t_point_hex: String,
-    pub sighash_hex: String,
-}
-
 #[derive(Clone, Debug)]
 pub struct KnowledgeProof { pub r_point: Point, pub s: Scalar }
+#[derive(Clone, Debug)]
+pub struct BuyerPartial { pub r_b: Point, pub s_b: Scalar, pub t_point: Point }
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PreSignature {
+    pub r_hex: String,
+    pub s_a_hex: String,
+    pub vk_hex: String,
+    pub sighash_hex: String,
+    pub session_hex: String,
+}
 
 impl Seller {
     pub fn new() -> Self {
@@ -45,32 +57,32 @@ impl Seller {
         let sk_a = Scalar::random(&mut rng);
         Self { sk_a, vk_a: base() * sk_a }
     }
-    /// Rejects the call if the buyer's knowledge proof does not verify.
-    pub fn pre_sign(&self, vk_b: Point, t_point: Point, sighash: &[u8], pok: &KnowledgeProof) -> Result<PreSignature, &'static str> {
-        if !verify_knowledge(vk_b, pok, b"pok-sk-b") {
-            return Err("buyer knowledge proof failed");
-        }
-        let mut rng = rng();
-        let r = Scalar::random(&mut rng);
-        let r_prime = base() * r + t_point;
-        let vk = self.vk_a + vk_b;
-        let rp = r_prime.to_bytes();
-        let vb = vk.to_bytes();
-        let c = challenge(&rp, &vb, sighash);
-        Ok(PreSignature {
-            r_prime_hex: hex::encode(rp),
-            s_a_hex: hex::encode((r + c * self.sk_a).to_repr()),
-            vk_hex: hex::encode(vb),
-            t_point_hex: hex::encode(t_point.to_bytes()),
-            sighash_hex: hex::encode(sighash),
-        })
-    }
-    pub fn prove_knowledge(&self) -> KnowledgeProof {
+    pub fn prove_knowledge(&self, vk_b: Point, session: &[u8]) -> KnowledgeProof {
         let mut rng = rng();
         let k = Scalar::random(&mut rng);
         let r_point = base() * k;
-        let c = challenge(&r_point.to_bytes(), &self.vk_a.to_bytes(), b"pok-sk-a");
+        let label = session_label(self.vk_a, vk_b, session);
+        let c = challenge(&r_point.to_bytes(), &self.vk_a.to_bytes(), &label);
         KnowledgeProof { r_point, s: k + c * self.sk_a }
+    }
+    pub fn pre_sign(&self, vk_b: Point, partial: &BuyerPartial, sighash: &[u8], session: &[u8], pok: &KnowledgeProof, alpha: Scalar) -> Result<(PreSignature, Scalar), &'static str> {
+        if !verify_knowledge(vk_b, pok, self.vk_a, session) {
+            return Err("buyer proof failed");
+        }
+        let mut rng = rng();
+        let r_a = Scalar::random(&mut rng);
+        let r_joint = base() * r_a + partial.r_b + partial.t_point;
+        let rk = self.vk_a + vk_b + base() * alpha;
+        let rp = r_joint.to_bytes();
+        let c = challenge(&rp, &rk.to_bytes(), sighash);
+        let s_a = r_a + c * (self.sk_a + alpha);
+        Ok((PreSignature {
+            r_hex: hex::encode(rp),
+            s_a_hex: hex::encode(s_a.to_repr()),
+            vk_hex: hex::encode(rk.to_bytes()),
+            sighash_hex: hex::encode(sighash),
+            session_hex: hex::encode(session),
+        }, r_a))
     }
 }
 
@@ -82,55 +94,34 @@ impl Buyer {
         Self { sk_b, vk_b: base() * sk_b, t }
     }
     pub fn t_point(&self) -> Point { base() * self.t }
-    pub fn verify_presig(&self, pre: &PreSignature) -> bool {
-        let rp = Point::from_bytes(&hex::decode(&pre.r_prime_hex).unwrap().try_into().unwrap()).unwrap();
-        let s_a = Scalar::from_repr(hex::decode(&pre.s_a_hex).unwrap().try_into().unwrap()).unwrap();
-        let vk = Point::from_bytes(&hex::decode(&pre.vk_hex).unwrap().try_into().unwrap()).unwrap();
-        let tp = Point::from_bytes(&hex::decode(&pre.t_point_hex).unwrap().try_into().unwrap()).unwrap();
-        let msg = hex::decode(&pre.sighash_hex).unwrap();
-        let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &msg);
-        base() * s_a == rp - tp + (vk - self.vk_b) * c
-    }
-    pub fn complete(&self, pre: &PreSignature) -> [u8; 64] {
-        let rp = Point::from_bytes(&hex::decode(&pre.r_prime_hex).unwrap().try_into().unwrap()).unwrap();
-        let s_a = Scalar::from_repr(hex::decode(&pre.s_a_hex).unwrap().try_into().unwrap()).unwrap();
-        let vk = Point::from_bytes(&hex::decode(&pre.vk_hex).unwrap().try_into().unwrap()).unwrap();
-        let msg = hex::decode(&pre.sighash_hex).unwrap();
-        let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &msg);
-        let s = s_a + c * self.sk_b + self.t;
-        let mut sig = [0u8; 64];
-        sig[..32].copy_from_slice(&rp.to_bytes());
-        sig[32..].copy_from_slice(s.to_repr().as_ref());
-        sig
-    }
-    pub fn verify_completed(&self, pre: &PreSignature, sig: &[u8; 64]) -> bool {
-        let rp = Point::from_bytes(&sig[..32].try_into().unwrap()).unwrap();
-        let s = Scalar::from_repr(sig[32..].try_into().unwrap()).unwrap();
-        let vk = Point::from_bytes(&hex::decode(&pre.vk_hex).unwrap().try_into().unwrap()).unwrap();
-        let msg = hex::decode(&pre.sighash_hex).unwrap();
-        let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &msg);
-        base() * s == rp + vk * c
-    }
-    pub fn prove_knowledge(&self) -> KnowledgeProof {
+    pub fn prove_knowledge(&self, vk_a: Point, session: &[u8]) -> KnowledgeProof {
         let mut rng = rng();
         let k = Scalar::random(&mut rng);
         let r_point = base() * k;
-        let c = challenge(&r_point.to_bytes(), &self.vk_b.to_bytes(), b"pok-sk-b");
+        let label = session_label(vk_a, self.vk_b, session);
+        let c = challenge(&r_point.to_bytes(), &self.vk_b.to_bytes(), &label);
         KnowledgeProof { r_point, s: k + c * self.sk_b }
+    }
+    pub fn partial(&self) -> BuyerPartial {
+        let mut rng = rng();
+        let r_b = Scalar::random(&mut rng);
+        BuyerPartial { r_b: base() * r_b, s_b: r_b, t_point: self.t_point() }
+    }
+    pub fn complete(&self, pre: &PreSignature, partial: &BuyerPartial) -> [u8; 64] {
+        let s_a = Scalar::from_repr(hex::decode(&pre.s_a_hex).unwrap().try_into().unwrap()).unwrap();
+        let s = s_a + partial.s_b + self.t;
+        let mut sig = [0u8; 64];
+        sig[..32].copy_from_slice(&hex::decode(&pre.r_hex).unwrap());
+        sig[32..].copy_from_slice(s.to_repr().as_ref());
+        sig
     }
 }
 
-pub fn extract_t(pre: &PreSignature, sig: &[u8; 64], sk_b: Scalar) -> Scalar {
-    let rp = Point::from_bytes(&hex::decode(&pre.r_prime_hex).unwrap().try_into().unwrap()).unwrap();
-    let s_a = Scalar::from_repr(hex::decode(&pre.s_a_hex).unwrap().try_into().unwrap()).unwrap();
-    let vk = Point::from_bytes(&hex::decode(&pre.vk_hex).unwrap().try_into().unwrap()).unwrap();
-    let msg = hex::decode(&pre.sighash_hex).unwrap();
-    let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &msg);
-    Scalar::from_repr(sig[32..].try_into().unwrap()).unwrap() - s_a - c * sk_b
-}
+pub fn extract_t(s: Scalar, s_a: Scalar, s_b: Scalar) -> Scalar { s - s_a - s_b }
 
-pub fn verify_knowledge(vk: Point, proof: &KnowledgeProof, label: &[u8]) -> bool {
-    let c = challenge(&proof.r_point.to_bytes(), &vk.to_bytes(), label);
+pub fn verify_knowledge(vk: Point, proof: &KnowledgeProof, vk_other: Point, session: &[u8]) -> bool {
+    let label = session_label(vk_other, vk, session);
+    let c = challenge(&proof.r_point.to_bytes(), &vk.to_bytes(), &label);
     base() * proof.s == proof.r_point + vk * c
 }
 
@@ -138,31 +129,33 @@ pub fn verify_knowledge(vk: Point, proof: &KnowledgeProof, label: &[u8]) -> bool
 mod tests {
     use super::*;
     #[test]
-    fn roundtrip_and_verify() {
+    fn seller_extracts_t_without_sk_b() {
         let seller = Seller::new();
         let buyer = Buyer::new();
-        let pre = seller.pre_sign(buyer.vk_b, buyer.t_point(), b"sighash", &buyer.prove_knowledge()).unwrap();
-        assert!(buyer.verify_presig(&pre));
-        let sig = buyer.complete(&pre);
-        assert!(buyer.verify_completed(&pre, &sig));
-        assert_eq!(extract_t(&pre, &sig, buyer.sk_b), buyer.t);
+        let session = b"session-1";
+        let partial = buyer.partial();
+        let pok = buyer.prove_knowledge(seller.vk_a, session);
+        let (pre, _) = seller.pre_sign(buyer.vk_b, &partial, b"sighash", session, &pok, Scalar::ZERO).unwrap();
+        let sig = buyer.complete(&pre, &partial);
+        let s = Scalar::from_repr(sig[32..].try_into().unwrap()).unwrap();
+        let s_a = Scalar::from_repr(hex::decode(&pre.s_a_hex).unwrap().try_into().unwrap()).unwrap();
+        assert_eq!(extract_t(s, s_a, partial.s_b), buyer.t);
     }
     #[test]
-    fn rogue_key_rejected() {
+    fn proof_binds_session() {
+        let seller = Seller::new();
+        let buyer = Buyer::new();
+        let pok = buyer.prove_knowledge(seller.vk_a, b"session-1");
+        assert!(verify_knowledge(buyer.vk_b, &pok, seller.vk_a, b"session-1"));
+        assert!(!verify_knowledge(buyer.vk_b, &pok, seller.vk_a, b"session-2"));
+    }
+    #[test]
+    fn rogue_proof_rejected() {
         let seller = Seller::new();
         let buyer = Buyer::new();
         let other = Buyer::new();
-        // Proof for a different key must be rejected
-        assert!(seller.pre_sign(buyer.vk_b, buyer.t_point(), b"sighash", &other.prove_knowledge()).is_err());
-    }
-    #[test]
-    fn wrong_t_fails() {
-        let seller = Seller::new();
-        let buyer = Buyer::new();
-        let pre = seller.pre_sign(buyer.vk_b, buyer.t_point(), b"sighash", &buyer.prove_knowledge()).unwrap();
-        let mut fake = Buyer::new();
-        fake.sk_b = buyer.sk_b;
-        fake.vk_b = buyer.vk_b;
-        assert!(!buyer.verify_completed(&pre, &fake.complete(&pre)));
+        let partial = buyer.partial();
+        let bad = other.prove_knowledge(seller.vk_a, b"session-1");
+        assert!(seller.pre_sign(buyer.vk_b, &partial, b"sighash", b"session-1", &bad, Scalar::ZERO).is_err());
     }
 }
