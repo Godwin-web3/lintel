@@ -1,7 +1,6 @@
 //! Lintel two-party adaptor protocol.
 //! Seller holds only sk_a. Buyer holds only sk_b and t.
-//! T = t·G is the only value shared before completion.
-//! The message signed is the transaction sighash, not a condition string.
+//! Joint vk = vk_a + vk_b. Both parties use c = H(R' || vk || m).
 
 use pasta_curves::pallas::{Point, Scalar};
 use group::{Group, GroupEncoding};
@@ -22,31 +21,19 @@ fn challenge(r: &[u8; 32], vk: &[u8; 32], msg: &[u8]) -> Scalar {
     <Scalar as FromUniformBytes<64>>::from_uniform_bytes(&arr)
 }
 
-fn base() -> Point {
-    Point::from_bytes(&ORCHARD_BASEPOINT).unwrap()
-}
+fn base() -> Point { Point::from_bytes(&ORCHARD_BASEPOINT).unwrap() }
 
-/// Seller's view. Holds only sk_a.
 #[derive(Clone)]
-pub struct Seller {
-    pub sk_a: Scalar,
-    pub vk_a: Point,
-}
+pub struct Seller { pub sk_a: Scalar, pub vk_a: Point }
 
-/// Buyer's view. Holds only sk_b and the condition secret t.
 #[derive(Clone)]
-pub struct Buyer {
-    pub sk_b: Scalar,
-    pub vk_b: Point,
-    pub t: Scalar,
-}
+pub struct Buyer { pub sk_b: Scalar, pub vk_b: Point, pub t: Scalar }
 
-/// What the seller publishes. Does not contain sk_a, sk_b, or t.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PreSignature {
     pub r_prime_hex: String,
     pub s_a_hex: String,
-    pub vk_a_hex: String,
+    pub vk_hex: String,
     pub t_point_hex: String,
     pub sighash_hex: String,
 }
@@ -55,23 +42,20 @@ impl Seller {
     pub fn new() -> Self {
         let mut rng = rng();
         let sk_a = Scalar::random(&mut rng);
-        let vk_a = base() * sk_a;
-        Self { sk_a, vk_a }
+        Self { sk_a, vk_a: base() * sk_a }
     }
-
-    /// Create an adaptor pre-signature. Receives only T from the buyer.
-    pub fn pre_sign(&self, t_point: Point, sighash: &[u8]) -> PreSignature {
+    pub fn pre_sign(&self, vk_b: Point, t_point: Point, sighash: &[u8]) -> PreSignature {
         let mut rng = rng();
         let r = Scalar::random(&mut rng);
         let r_prime = base() * r + t_point;
-        let rp_bytes = r_prime.to_bytes();
-        let vk_bytes = self.vk_a.to_bytes();
-        let c = challenge(&rp_bytes, &vk_bytes, sighash);
-        let s_a = r + c * self.sk_a;
+        let vk = self.vk_a + vk_b;
+        let rp = r_prime.to_bytes();
+        let vb = vk.to_bytes();
+        let c = challenge(&rp, &vb, sighash);
         PreSignature {
-            r_prime_hex: hex::encode(rp_bytes),
-            s_a_hex: hex::encode(s_a.to_repr()),
-            vk_a_hex: hex::encode(vk_bytes),
+            r_prime_hex: hex::encode(rp),
+            s_a_hex: hex::encode((r + c * self.sk_a).to_repr()),
+            vk_hex: hex::encode(vb),
             t_point_hex: hex::encode(t_point.to_bytes()),
             sighash_hex: hex::encode(sighash),
         }
@@ -83,81 +67,75 @@ impl Buyer {
         let mut rng = rng();
         let sk_b = Scalar::random(&mut rng);
         let t = Scalar::random(&mut rng);
-        let vk_b = base() * sk_b;
-        Self { sk_b, vk_b, t }
+        Self { sk_b, vk_b: base() * sk_b, t }
     }
+    pub fn t_point(&self) -> Point { base() * self.t }
 
-    pub fn t_point(&self) -> Point {
-        base() * self.t
-    }
-
-    /// Verify the seller's pre-signature: s_a·G == R' - T + c·vk_a
     pub fn verify_presig(&self, pre: &PreSignature) -> bool {
         let rp = Point::from_bytes(&hex::decode(&pre.r_prime_hex).unwrap().try_into().unwrap()).unwrap();
         let s_a = Scalar::from_repr(hex::decode(&pre.s_a_hex).unwrap().try_into().unwrap()).unwrap();
-        let vk_a = Point::from_bytes(&hex::decode(&pre.vk_a_hex).unwrap().try_into().unwrap()).unwrap();
-        let t_point = Point::from_bytes(&hex::decode(&pre.t_point_hex).unwrap().try_into().unwrap()).unwrap();
-        let sighash = hex::decode(&pre.sighash_hex).unwrap();
-        let c = challenge(&rp.to_bytes(), &vk_a.to_bytes(), &sighash);
-        let lhs = base() * s_a;
-        let rhs = rp - t_point + vk_a * c;
-        lhs == rhs
+        let vk = Point::from_bytes(&hex::decode(&pre.vk_hex).unwrap().try_into().unwrap()).unwrap();
+        let tp = Point::from_bytes(&hex::decode(&pre.t_point_hex).unwrap().try_into().unwrap()).unwrap();
+        let msg = hex::decode(&pre.sighash_hex).unwrap();
+        let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &msg);
+        let vk_a = vk - self.vk_b;
+        base() * s_a == rp - tp + vk_a * c
     }
 
-    /// Complete the signature. Only the buyer can do this.
     pub fn complete(&self, pre: &PreSignature) -> [u8; 64] {
         let rp = Point::from_bytes(&hex::decode(&pre.r_prime_hex).unwrap().try_into().unwrap()).unwrap();
         let s_a = Scalar::from_repr(hex::decode(&pre.s_a_hex).unwrap().try_into().unwrap()).unwrap();
-        let vk_a = Point::from_bytes(&hex::decode(&pre.vk_a_hex).unwrap().try_into().unwrap()).unwrap();
-        let sighash = hex::decode(&pre.sighash_hex).unwrap();
-        let vk = vk_a + self.vk_b;
-        let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &sighash);
+        let vk = Point::from_bytes(&hex::decode(&pre.vk_hex).unwrap().try_into().unwrap()).unwrap();
+        let msg = hex::decode(&pre.sighash_hex).unwrap();
+        let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &msg);
         let s = s_a + c * self.sk_b + self.t;
         let mut sig = [0u8; 64];
         sig[..32].copy_from_slice(&rp.to_bytes());
         sig[32..].copy_from_slice(s.to_repr().as_ref());
         sig
     }
+
+    pub fn verify_completed(&self, pre: &PreSignature, sig: &[u8; 64]) -> bool {
+        let rp = Point::from_bytes(&sig[..32].try_into().unwrap()).unwrap();
+        let s = Scalar::from_repr(sig[32..].try_into().unwrap()).unwrap();
+        let vk = Point::from_bytes(&hex::decode(&pre.vk_hex).unwrap().try_into().unwrap()).unwrap();
+        let msg = hex::decode(&pre.sighash_hex).unwrap();
+        let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &msg);
+        base() * s == rp + vk * c
+    }
 }
 
-/// Extract t from the completed signature.
-pub fn extract_t(pre: &PreSignature, completed_sig: &[u8; 64], sk_b: Scalar) -> Scalar {
+pub fn extract_t(pre: &PreSignature, sig: &[u8; 64], sk_b: Scalar) -> Scalar {
     let rp = Point::from_bytes(&hex::decode(&pre.r_prime_hex).unwrap().try_into().unwrap()).unwrap();
     let s_a = Scalar::from_repr(hex::decode(&pre.s_a_hex).unwrap().try_into().unwrap()).unwrap();
-    let vk_a = Point::from_bytes(&hex::decode(&pre.vk_a_hex).unwrap().try_into().unwrap()).unwrap();
-    let sighash = hex::decode(&pre.sighash_hex).unwrap();
-    let vk = vk_a + base() * sk_b;
-    let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &sighash);
-    let s = Scalar::from_repr(completed_sig[32..].try_into().unwrap()).unwrap();
+    let vk = Point::from_bytes(&hex::decode(&pre.vk_hex).unwrap().try_into().unwrap()).unwrap();
+    let msg = hex::decode(&pre.sighash_hex).unwrap();
+    let c = challenge(&rp.to_bytes(), &vk.to_bytes(), &msg);
+    let s = Scalar::from_repr(sig[32..].try_into().unwrap()).unwrap();
     s - s_a - c * sk_b
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn two_party_roundtrip() {
+    fn roundtrip_and_verify() {
         let seller = Seller::new();
         let buyer = Buyer::new();
-        let sighash = b"real-tx-sighash-32-bytes-pad!!";
-        let pre = seller.pre_sign(buyer.t_point(), sighash);
-        assert!(buyer.verify_presig(&pre), "pre-signature must verify");
+        let pre = seller.pre_sign(buyer.vk_b, buyer.t_point(), b"sighash");
+        assert!(buyer.verify_presig(&pre));
         let sig = buyer.complete(&pre);
-        let extracted = extract_t(&pre, &sig, buyer.sk_b);
-        assert_eq!(extracted, buyer.t, "extracted t must match");
+        assert!(buyer.verify_completed(&pre, &sig));
+        assert_eq!(extract_t(&pre, &sig, buyer.sk_b), buyer.t);
     }
-
     #[test]
-    fn adversary_cannot_complete() {
+    fn wrong_t_fails() {
         let seller = Seller::new();
         let buyer = Buyer::new();
-        let sighash = b"sighash";
-        let pre = seller.pre_sign(buyer.t_point(), sighash);
+        let pre = seller.pre_sign(buyer.vk_b, buyer.t_point(), b"sighash");
         let mut fake = Buyer::new();
         fake.sk_b = buyer.sk_b;
-        let bad_sig = fake.complete(&pre);
-        let extracted = extract_t(&pre, &bad_sig, buyer.sk_b);
-        assert_ne!(extracted, buyer.t);
+        fake.vk_b = buyer.vk_b;
+        assert!(!buyer.verify_completed(&pre, &fake.complete(&pre)));
     }
 }
