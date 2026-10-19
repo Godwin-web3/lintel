@@ -13,7 +13,8 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, bail};
+use ff013::PrimeField;
 use orchard::primitives::redpallas::{self, SpendAuth};
 use pczt::roles::low_level_signer;
 use pczt::roles::signer::Signer;

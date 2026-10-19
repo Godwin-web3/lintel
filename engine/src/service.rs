@@ -1,8 +1,11 @@
+//! Legacy single-process demo service used by web/server.py.
+//! Peer-supplied hex is parsed without panicking.
 use pasta_curves::pallas::{Point, Scalar};
-use group::{Group, GroupEncoding};
+use group::GroupEncoding;
 use ff::{Field, PrimeField, FromUniformBytes};
 use rand::rng;
 use blake2b_simd::Params;
+use crate::protocol::{parse_point, parse_scalar};
 use serde::{Serialize, Deserialize};
 
 const ORCHARD_BASEPOINT: [u8; 32] = [
@@ -57,19 +60,17 @@ pub fn create_payment(amount: &str, condition: &str) -> CreateResult {
     }
 }
 
-pub fn complete_payment(cr: &CreateResult) -> Result<String, String> {
-    let base = Point::from_bytes(&ORCHARD_BASEPOINT).unwrap();
-    let rp = Point::from_bytes(&hex::decode(&cr.r_prime_hex).unwrap().try_into().unwrap()).unwrap();
-    let s_a = Scalar::from_repr(hex::decode(&cr.s_a_hex).unwrap().try_into().unwrap()).unwrap();
-    let vk = Point::from_bytes(&hex::decode(&cr.vk_hex).unwrap().try_into().unwrap()).unwrap();
-    let sk_b = Scalar::from_repr(hex::decode(&cr.sk_b_hex).unwrap().try_into().unwrap()).unwrap();
-    let t = Scalar::from_repr(hex::decode(&cr.t_hex).unwrap().try_into().unwrap()).unwrap();
+pub fn complete_payment(cr: &CreateResult) -> Result<String, &'static str> {
+    let rp = parse_point(&cr.r_prime_hex).ok_or("invalid r_prime")?;
+    let s_a = parse_scalar(&cr.s_a_hex).ok_or("invalid s_a")?;
+    let vk = parse_point(&cr.vk_hex).ok_or("invalid vk")?;
+    let sk_b = parse_scalar(&cr.sk_b_hex).ok_or("invalid sk_b")?;
+    let t = parse_scalar(&cr.t_hex).ok_or("invalid t")?;
     let msg = cr.condition.as_bytes();
     let c = challenge(&rp.to_bytes(), &vk.to_bytes(), msg);
     let s = s_a + c * sk_b + t;
     let mut sig = [0u8; 64];
     sig[..32].copy_from_slice(&rp.to_bytes());
     sig[32..].copy_from_slice(s.to_repr().as_ref());
-    let _ = base;
     Ok(hex::encode(sig))
 }

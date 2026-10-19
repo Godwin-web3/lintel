@@ -6,21 +6,24 @@ autobins = false
 
 [features]
 default = []
-inject = ["dep:orchard", "dep:pczt", "dep:anyhow"]
+inject = ["dep:orchard", "dep:pczt", "dep:anyhow", "dep:ff013"]
 
 [dependencies]
 blake2b_simd = "1.0"
-ff = "0.13"
-group = "0.13"
-pasta_curves = "0.5"
-rand = "0.8"
+ff = "0.14"
+group = "0.14"
+pasta_curves = "0.6"
+rand = "0.10"
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-halo2_proofs = "0.3"
+halo2_proofs = "0.4"
+halo2_gadgets = "0.6"
 orchard = { version = "0.15", optional = true }
-pczt = { version = "0.9", optional = true }
+pczt = { version = "0.9", optional = true, features = ["signer"] }
 anyhow = { version = "1", optional = true }
+# orchard/pczt still expose pasta 0.5 scalars (ff 0.13)
+ff013 = { package = "ff", version = "0.13", optional = true }
 
 [lib]
 name = "lintel"

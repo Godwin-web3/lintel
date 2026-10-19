@@ -29,10 +29,11 @@ cargo run --bin lintel-cli -- demo
 - Seller proves knowledge of `sk_a`; proofs use a separate domain.
 - Completed signature verifies under `rk`.
 - Seller extracts `t` without `sk_b`.
-- MinValue circuit: in-circuit commitment `C = value + blind + txid` is a public input; gated running sum.
+- MinValue circuit: `C = Poseidon(value, blind, txid_lo, txid_hi)` computed in-circuit; public inputs `[min, txid_lo, txid_hi, C]`; running sum starts from a fixed constant 0, 64-bit range check on `value - min`.
+- Real Halo 2 prove/verify (IPA over Pasta) in `disclosure::prove`.
+- Peer-supplied hex is parsed with `parse_scalar`/`parse_point`; malformed input returns an error, never panics.
 
 ## Not yet done
 
-- Poseidon commitment (current commitment is linear).
 - reddsa SpendAuth cross-check.
 - Testnet transaction with this flow.
