@@ -119,6 +119,8 @@ impl Buyer {
         let sk_b = Scalar::random(&mut rng);
         Self { sk_b, vk_b: base() * sk_b, t }
     }
+    /// Rebuilds a party from a saved signing share and adaptor secret.
+    pub fn from_parts(sk_b: Scalar, t: Scalar) -> Self { Self { sk_b, vk_b: base() * sk_b, t } }
     pub fn t_point(&self) -> Point { base() * self.t }
     pub fn prove_knowledge(&self, vk_a: Point, session: &[u8]) -> KnowledgeProof {
         let mut rng = rng();

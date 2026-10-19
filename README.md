@@ -34,6 +34,13 @@ cargo run --release --bin lintel-cli -- sealed-demo "your secret payload"
 # {"offer_verified":true,"paid_ok":true,"decrypted_ok":true,"proof_bytes":4352,...}
 ```
 
+## Web app
+
+`web/` is a browser marketplace for sealed goods: sell, verify, buy, unlock.
+The engine runs in the browser through `wasm/` (`lintel-wasm`), so signing
+shares, the unlock secret and plaintext never leave the user's device; a small
+relay (`web/relay`) carries only public data. See [web/README.md](web/README.md).
+
 ## Reproduce
 
 ```bash
