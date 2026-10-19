@@ -3,6 +3,7 @@ services:
   - type: web
     name: lintel-relay
     runtime: node
+    plan: free
     rootDir: web/relay
     buildCommand: "true"
     startCommand: node server.js
