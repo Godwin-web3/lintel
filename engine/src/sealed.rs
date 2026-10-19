@@ -340,7 +340,39 @@ pub mod prove {
     }
 
     pub fn setup<const N: usize>() -> Result<Keys<N>, Error> {
-        let params: Params<vesta::Affine> = Params::new(k_for(N));
+        keys_from_params(Params::new(k_for(N)))
+    }
+
+    /// Serialized commitment parameters (public, transparent: no trusted setup).
+    /// Shipping these saves the slowest part of setup on low-power devices.
+    pub fn params_bytes<const N: usize>() -> Vec<u8> {
+        let mut out = vec![];
+        Params::<vesta::Affine>::new(k_for(N)).write(&mut out).expect("vec write");
+        out
+    }
+
+    /// BLAKE2b-256 digest used to pin a parameter file.
+    pub fn params_digest(bytes: &[u8]) -> [u8; 32] {
+        let h = blake2b_simd::Params::new().hash_length(32).personal(b"lintel-params-v1").hash(bytes);
+        let mut d = [0u8; 32];
+        d.copy_from_slice(h.as_bytes());
+        d
+    }
+
+    /// Builds keys from downloaded parameters. The digest must match the one
+    /// pinned in the binary: substituted generators would break soundness.
+    pub fn setup_from_params<const N: usize>(bytes: &[u8], pinned: &[u8; 32]) -> Result<Keys<N>, &'static str> {
+        if &params_digest(bytes) != pinned {
+            return Err("parameter file does not match pinned digest");
+        }
+        let params = Params::<vesta::Affine>::read(&mut &bytes[..]).map_err(|_| "malformed parameters")?;
+        if params.k() != k_for(N) {
+            return Err("parameters are for the wrong circuit size");
+        }
+        keys_from_params(params).map_err(|_| "key generation failed")
+    }
+
+    fn keys_from_params<const N: usize>(params: Params<vesta::Affine>) -> Result<Keys<N>, Error> {
         let empty = SealedCircuit::<N>::default();
         let vk = keygen_vk(&params, &empty)?;
         let pk = keygen_pk(&params, vk.clone(), &empty)?;
@@ -367,6 +399,43 @@ pub struct SealedOffer {
     pub content_hash: F,
     pub ciphertext: Vec<F>,
     pub proof: Vec<u8>,
+}
+
+/// Wire form of [`SealedOffer`]: hex strings, safe to relay.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SealedOfferWire {
+    pub t_point: String,
+    pub content_hash: String,
+    pub ciphertext: Vec<String>,
+    pub proof: String,
+}
+
+pub fn field_hex(f: &F) -> String { hex::encode(f.to_repr()) }
+
+/// Parses a canonical base field element from untrusted hex. Never panics.
+pub fn parse_field(h: &str) -> Option<F> {
+    let b: [u8; 32] = hex::decode(h).ok()?.try_into().ok()?;
+    Option::from(F::from_repr(b))
+}
+
+impl SealedOffer {
+    pub fn to_wire(&self) -> SealedOfferWire {
+        SealedOfferWire {
+            t_point: hex::encode(self.t_point.to_bytes()),
+            content_hash: field_hex(&self.content_hash),
+            ciphertext: self.ciphertext.iter().map(field_hex).collect(),
+            proof: hex::encode(&self.proof),
+        }
+    }
+    /// Parses untrusted wire data. Never panics.
+    pub fn from_wire(w: &SealedOfferWire) -> Option<Self> {
+        Some(Self {
+            t_point: crate::protocol::parse_point(&w.t_point)?,
+            content_hash: parse_field(&w.content_hash)?,
+            ciphertext: w.ciphertext.iter().map(|c| parse_field(c)).collect::<Option<Vec<_>>>()?,
+            proof: hex::decode(&w.proof).ok()?,
+        })
+    }
 }
 
 /// Seals `payload` under secret `s` (with `t = scalar_from_base(s)`).
@@ -421,6 +490,20 @@ mod tests {
     fn generator_matches_protocol_base() {
         let b = pallas::Point::from_bytes(&protocol::ORCHARD_BASEPOINT).unwrap();
         assert_eq!(pallas::Point::from(generator()).to_bytes(), b.to_bytes());
+    }
+
+    #[test]
+    fn wire_roundtrip_and_garbage() {
+        let w = SealedOfferWire { t_point: "zz".into(), content_hash: "00".into(), ciphertext: vec![], proof: "".into() };
+        assert!(SealedOffer::from_wire(&w).is_none());
+        let (_, s) = new_secret();
+        let o = SealedOffer {
+            t_point: pallas::Point::from(generator()) * scalar_from_base(s),
+            content_hash: F::from(5u64), ciphertext: vec![F::ONE, F::from(2u64)], proof: vec![1, 2, 3],
+        };
+        let back = SealedOffer::from_wire(&o.to_wire()).unwrap();
+        assert_eq!(back.t_point, o.t_point);
+        assert_eq!(back.ciphertext, o.ciphertext);
     }
 
     #[test]
