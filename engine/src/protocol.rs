@@ -4,9 +4,9 @@
 //! verify_presig recomputes R and checks vk_hex against rk.
 
 use pasta_curves::pallas::{Point, Scalar};
-use group::{Group, GroupEncoding};
+use group::GroupEncoding;
 use ff::{Field, PrimeField, FromUniformBytes};
-use rand::thread_rng as rng;
+use rand::rng;
 use blake2b_simd::Params;
 use serde::{Serialize, Deserialize};
 
@@ -27,7 +27,19 @@ fn pok_challenge(r: &[u8; 32], vk: &[u8; 32], label: &[u8]) -> Scalar {
     let arr: [u8; 64] = h.as_bytes().try_into().unwrap();
     <Scalar as FromUniformBytes<64>>::from_uniform_bytes(&arr)
 }
-fn base() -> Point { Point::from_bytes(&ORCHARD_BASEPOINT).unwrap() }
+fn base() -> Point { Point::from_bytes(&ORCHARD_BASEPOINT).unwrap() } // constant, always valid
+
+fn bytes32(hex_str: &str) -> Option<[u8; 32]> {
+    hex::decode(hex_str).ok()?.try_into().ok()
+}
+/// Parses a canonical scalar from untrusted hex. Never panics.
+pub fn parse_scalar(hex_str: &str) -> Option<Scalar> {
+    Option::from(Scalar::from_repr(bytes32(hex_str)?))
+}
+/// Parses a valid curve point from untrusted hex. Never panics.
+pub fn parse_point(hex_str: &str) -> Option<Point> {
+    Option::from(Point::from_bytes(&bytes32(hex_str)?))
+}
 fn session_label(a: Point, b: Point, session: &[u8]) -> Vec<u8> {
     let mut v = Vec::new();
     v.extend_from_slice(&a.to_bytes());
@@ -121,68 +133,47 @@ impl Buyer {
     }
     /// Recomputes R = R_a + R_b + T and checks vk_hex against rk.
     pub fn verify_presig(&self, pre: &PreSignature, r_a_point: Point, r_b_point: Point, vk_a: Point, alpha: Scalar) -> bool {
-        let s_a_bytes = match hex::decode(&pre.s_a_hex) {
-            Ok(b) if b.len() == 32 => b,
-            _ => return false,
-        };
-        let s_a_arr: [u8; 32] = match s_a_bytes.try_into() {
-            Ok(a) => a,
-            Err(_) => return false,
-        };
-        let s_a = Scalar::from_repr(s_a_arr).unwrap();
+        let (Some(s_a), Some(r_arr), Some(vk_arr), Ok(msg)) = (
+            parse_scalar(&pre.s_a_hex),
+            bytes32(&pre.r_hex),
+            bytes32(&pre.vk_hex),
+            hex::decode(&pre.sighash_hex),
+        ) else { return false };
         let rk = vk_a + self.vk_b + base() * alpha;
         let r_expected = r_a_point + r_b_point + self.t_point();
-        let r_bytes = match hex::decode(&pre.r_hex) {
-            Ok(b) if b.len() == 32 => b,
-            _ => return false,
-        };
-        let mut r_arr = [0u8; 32];
-        r_arr.copy_from_slice(&r_bytes);
         if r_arr != r_expected.to_bytes() { return false; }
-        let vk_bytes = match hex::decode(&pre.vk_hex) {
-            Ok(b) if b.len() == 32 => b,
-            _ => return false,
-        };
-        if vk_bytes.as_slice() != rk.to_bytes().as_ref() { return false; }
-        let msg = match hex::decode(&pre.sighash_hex) {
-            Ok(m) => m,
-            Err(_) => return false,
-        };
-        let c = challenge(&r_arr, &rk.to_bytes(), &msg);
+        if vk_arr != rk.to_bytes() { return false; }
+        let c = challenge(&r_arr, &vk_arr, &msg);
         base() * s_a == r_a_point + (vk_a + base() * alpha) * c
     }
     pub fn complete(&self, pre: &PreSignature, partial: &BuyerPartial) -> Option<[u8; 64]> {
-        let s_a_bytes: [u8; 32] = hex::decode(&pre.s_a_hex).ok()?.try_into().ok()?;
-        let s_a = Scalar::from_repr(s_a_bytes).unwrap();
+        let s_a = parse_scalar(&pre.s_a_hex)?;
+        let r_bytes = bytes32(&pre.r_hex)?;
         let s = s_a + partial.s_b + self.t;
-        let r_bytes = hex::decode(&pre.r_hex).ok()?;
-        if r_bytes.len() != 32 { return None; }
         let mut sig = [0u8; 64];
         sig[..32].copy_from_slice(&r_bytes);
         sig[32..].copy_from_slice(s.to_repr().as_ref());
         Some(sig)
     }
     pub fn verify_completed(&self, pre: &PreSignature, sig: &[u8; 64]) -> bool {
-        let mut rp_bytes = [0u8; 32];
-        rp_bytes.copy_from_slice(&sig[..32]);
-        let rp = Point::from_bytes(&rp_bytes).unwrap();
-        let mut s_bytes = [0u8; 32];
-        s_bytes.copy_from_slice(&sig[32..]);
-        let s = Scalar::from_repr(s_bytes).unwrap();
-        let rk_bytes_vec = match hex::decode(&pre.vk_hex) {
-            Ok(b) if b.len() == 32 => b,
-            _ => return false,
-        };
-        let mut rk_bytes = [0u8; 32];
-        rk_bytes.copy_from_slice(&rk_bytes_vec);
-        let rk = Point::from_bytes(&rk_bytes).unwrap();
-        let msg = match hex::decode(&pre.sighash_hex) {
-            Ok(m) => m,
-            Err(_) => return false,
-        };
-        let c = challenge(&rp.to_bytes(), &rk.to_bytes(), &msg);
-        base() * s == rp + rk * c
+        verify_sig(&pre.vk_hex, &pre.sighash_hex, sig)
     }
+}
+
+/// Verifies a RedPallas-style signature from untrusted inputs. Never panics.
+pub fn verify_sig(rk_hex: &str, sighash_hex: &str, sig: &[u8; 64]) -> bool {
+    let mut rp_bytes = [0u8; 32];
+    rp_bytes.copy_from_slice(&sig[..32]);
+    let mut s_bytes = [0u8; 32];
+    s_bytes.copy_from_slice(&sig[32..]);
+    let (Some(rp), Some(s), Some(rk), Ok(msg)) = (
+        Option::<Point>::from(Point::from_bytes(&rp_bytes)),
+        Option::<Scalar>::from(Scalar::from_repr(s_bytes)),
+        parse_point(rk_hex),
+        hex::decode(sighash_hex),
+    ) else { return false };
+    let c = challenge(&rp.to_bytes(), &rk.to_bytes(), &msg);
+    base() * s == rp + rk * c
 }
 
 pub fn extract_t(s: Scalar, s_a: Scalar, s_b: Scalar) -> Scalar { s - s_a - s_b }
@@ -235,5 +226,16 @@ mod tests {
         let partial = buyer.partial(base() * Scalar::ZERO, seller.vk_a, Scalar::ZERO, b"h");
         let bad = other.prove_knowledge(seller.vk_a, b"s");
         assert!(seller.pre_sign(buyer.vk_b, &partial, b"h", b"s", &bad, Scalar::ZERO).is_err());
+    }
+    #[test]
+    fn malformed_peer_input_does_not_panic() {
+        let buyer = Buyer::new();
+        let bad = PreSignature { r_hex: "zz".into(), s_a_hex: "ff".repeat(32), vk_hex: "00".into(), sighash_hex: "x".into() };
+        let p = base();
+        assert!(!buyer.verify_presig(&bad, p, p, p, Scalar::ZERO));
+        assert!(buyer.complete(&bad, &BuyerPartial { r_b: p, s_b: Scalar::ZERO, t_point: p }).is_none());
+        assert!(!buyer.verify_completed(&bad, &[0xffu8; 64]));
+        assert!(parse_scalar(&"ff".repeat(32)).is_none());
+        assert!(parse_point("00").is_none());
     }
 }
