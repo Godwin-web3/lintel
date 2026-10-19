@@ -1,0 +1,19 @@
+# Render blueprint for the Lintel relay (public data only).
+services:
+  - type: web
+    name: lintel-relay
+    runtime: node
+    rootDir: web/relay
+    buildCommand: "true"
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: https://your-app.vercel.app
+    # Free instances have an ephemeral filesystem: listings reset on redeploy.
+    # On a paid plan, uncomment to persist them:
+    # disk:
+    #   name: lintel-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
+    # and add env DATA_FILE=/var/data/lintel.json
