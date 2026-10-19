@@ -113,6 +113,12 @@ impl Buyer {
         let t = Scalar::random(&mut rng);
         Self { sk_b, vk_b: base() * sk_b, t }
     }
+    /// Uses a chosen adaptor secret, e.g. one from `sealed::new_secret`.
+    pub fn with_secret(t: Scalar) -> Self {
+        let mut rng = rng();
+        let sk_b = Scalar::random(&mut rng);
+        Self { sk_b, vk_b: base() * sk_b, t }
+    }
     pub fn t_point(&self) -> Point { base() * self.t }
     pub fn prove_knowledge(&self, vk_a: Point, session: &[u8]) -> KnowledgeProof {
         let mut rng = rng();
