@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { crypto, relay, store, randomHex, randomAlpha, sleep, RELAY } from './api.js';
+import { sellV2, startSellerAgent, MAX_COPIES } from './presale.js';
+import { ListingV2, SellerCardV2, Purchases, copiesLabel } from './Presale.jsx';
 
 // ---------- tiny hash router ----------
 function useRoute() {
@@ -47,18 +49,23 @@ function Notice() {
 export default function App() {
   const route = useRoute();
   const [boot, setBoot] = useState({ state: 'loading' });
+  const [agent, setAgent] = useState({});
 
   useEffect(() => {
     const t0 = performance.now();
-    crypto('boot')
+    // ?threads=0 forces the single-threaded engine (for comparison).
+    crypto('boot', { threads: new URLSearchParams(location.search).get('threads') })
       .then((r) => setBoot({ state: 'ready', ...r, ms: Math.round(performance.now() - t0) }))
       .catch((e) => setBoot({ state: 'error', error: e.message }));
   }, []);
 
+  // Presale listings complete in the background on any page, not only "My sales".
+  useEffect(() => (boot.state === 'ready' ? startSellerAgent(setAgent) : undefined), [boot.state]);
+
   let page;
   if (route[0] === 'sell') page = <Sell boot={boot} />;
   else if (route[0] === 'listing' && route[1]) page = <Listing id={route[1]} boot={boot} />;
-  else if (route[0] === 'mine') page = <Mine boot={boot} />;
+  else if (route[0] === 'mine') page = <Mine boot={boot} agent={agent} />;
   else page = <Market />;
 
   return (
@@ -74,7 +81,7 @@ export default function App() {
         </nav>
         <span className={`engine ${boot.state}`} title={boot.error || ''}>
           {boot.state === 'loading' && 'Loading prover…'}
-          {boot.state === 'ready' && `Prover ready · ${(boot.ms / 1000).toFixed(1)}s`}
+          {boot.state === 'ready' && `Prover ready · ${(boot.ms / 1000).toFixed(1)}s · ${boot.threads > 1 ? `${boot.threads} threads` : '1 thread'}`}
           {boot.state === 'error' && 'Prover failed to load'}
         </span>
       </header>
@@ -119,23 +126,24 @@ function Market() {
             </div>
             <p>{l.description || <i className="muted">No description</i>}</p>
             <div className="row muted small">
-              <span>{fmtBytes(l.size)} sealed</span>
+              <span>{fmtBytes(l.size)} sealed{copiesLabel(l) ? ` · ${copiesLabel(l)}` : ''}</span>
               <span className={`tag ${l.status}`}>{l.status}</span>
             </div>
           </a>
         ))}
       </div>
+      <Purchases />
     </section>
   );
 }
 
 // ---------- sell ----------
 function Sell({ boot }) {
-  const [form, setForm] = useState({ title: '', description: '', price: '', text: '' });
+  const [form, setForm] = useState({ title: '', description: '', price: '', text: '', copies: '1' });
   const [file, setFile] = useState(null);
   const [steps, setSteps] = useState(null);
   const [err, setErr] = useState('');
-  const max = boot.maxPayload || 1953;
+  const max = boot.maxPayloadV2 || 7905;
 
   const payloadBytes = async () => (file ? new Uint8Array(await file.arrayBuffer()) : new TextEncoder().encode(form.text));
   const size = file ? file.size : new TextEncoder().encode(form.text).length;
@@ -143,23 +151,23 @@ function Sell({ boot }) {
   async function submit(e) {
     e.preventDefault();
     setErr('');
-    const s = [['Seal content and build Halo 2 proof', 'run'], ['Publish public listing to relay', 'wait'], ['Save seller keys on this device', 'wait']];
+    const copies = Math.max(1, Math.min(MAX_COPIES, Number(form.copies) || 1));
+    const s = [[`Seal ${copies} cop${copies > 1 ? 'ies' : 'y'}, each under its own secret, with Halo 2 proofs`, 'run'], ['Publish to relay and keep seller keys on this device', 'wait']];
     setSteps([...s]);
     try {
       const payload = await payloadBytes();
       const t0 = performance.now();
-      const sealed = await crypto('seal', { payload });
-      s[0] = ['Seal content and build Halo 2 proof', 'done', `${((performance.now() - t0) / 1000).toFixed(1)}s on this device`];
-      s[1][1] = 'run'; setSteps([...s]);
-      const { listing, seller_token } = await relay('POST', '/listings', {
-        title: form.title.trim(), description: form.description.trim(), price_zec: form.price.trim(),
-        content_hash: sealed.contentHash, merchant_vk: sealed.merchantVk, t_point: sealed.tPoint,
-        offer: sealed.offer, filename: file?.name, size: payload.length,
+      // Presale (v2): every copy is pre-sealed now, so buyers never wait for this device.
+      await sellV2({
+        payload, copies,
+        meta: { title: form.title.trim(), description: form.description.trim(), price_zec: form.price.trim(), filename: file?.name },
+        onStep: (i, n, ms) => {
+          s[0][2] = `copy ${i}/${n} sealed in ${(ms / 1000).toFixed(1)}s`;
+          s[1][1] = 'run'; setSteps(s.map((x) => [...x]));
+        },
       });
-      s[1] = ['Publish public listing to relay', 'done', `content hash ${short(sealed.contentHash)}`];
-      s[2][1] = 'run'; setSteps([...s]);
-      store.put((st) => { st.selling[listing.id] = { state: sealed.state, token: seller_token, title: listing.title }; });
-      s[2][1] = 'done'; setSteps([...s]);
+      s[0] = [s[0][0], 'done', `${((performance.now() - t0) / 1000).toFixed(1)}s total on this device`];
+      s[1][1] = 'done'; setSteps(s.map((x) => [...x]));
       setTimeout(() => go(`/mine`), 600);
     } catch (e2) {
       const i = s.findIndex((x) => x[1] === 'run');
@@ -173,13 +181,15 @@ function Sell({ boot }) {
     <section className="narrow">
       <h1>Sell sealed content</h1>
       <p className="muted">
-        Your content is encrypted in this browser under a fresh secret. Only the matching payment signature
-        reveals that secret to the buyer. Each listing sells once.
+        Your content is encrypted in this browser. Each copy gets its own secret, so one sale never unlocks
+        another. Buyers can purchase while you are offline; your browser completes their sales the next time
+        this app is open on this device.
       </p>
       <form onSubmit={submit} className="form">
         <label>Title<input required maxLength={120} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Critical bug report: Acme vault" /></label>
         <label>Public description<textarea maxLength={2000} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What the buyer gets, without giving it away" /></label>
         <label>Price (ZEC)<input required inputMode="decimal" pattern="\d{1,8}(\.\d{1,8})?" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0.5" /></label>
+        <label>Copies for sale<input type="number" min={1} max={MAX_COPIES} value={form.copies} onChange={(e) => setForm({ ...form, copies: e.target.value })} /></label>
         <label>Secret content
           <textarea className="mono" rows={6} disabled={!!file} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Paste the secret text here, or attach a small file below" />
         </label>
@@ -193,14 +203,14 @@ function Sell({ boot }) {
         </button>
       </form>
       {steps && <Steps steps={steps} />}
-      {busy && steps[0][1] === 'run' && <p className="muted small">Proving takes up to a minute on phones. Keep this tab open.</p>}
+      {busy && steps[0][1] === 'run' && <p className="muted small">Each copy needs its own proof (more for files over 1.9 KB). Keep this tab open until listing finishes.</p>}
       {err && <p className="error">{err}</p>}
     </section>
   );
 }
 
 // ---------- my sales (seller side of the protocol) ----------
-function Mine({ boot }) {
+function Mine({ boot, agent = {} }) {
   const [mine, setMine] = useState(() => store.get().selling);
   const [live, setLive] = useState({});
   const busy = useRef(new Set());
@@ -209,10 +219,11 @@ function Mine({ boot }) {
     if (boot.state !== 'ready') return;
     let stop = false;
     (async () => {
-      for (const [id, s] of Object.entries(mine)) await crypto('loadMerchant', { key: id, state: s.state }).catch(() => {});
+      const v1 = Object.entries(mine).filter(([, s]) => s.v !== 2); // presale listings run in the background agent
+      for (const [id, s] of v1) await crypto('loadMerchant', { key: id, state: s.state }).catch(() => {});
       while (!stop) {
         const next = {};
-        for (const [id, s] of Object.entries(mine)) {
+        for (const [id, s] of v1) {
           try {
             const { listing, session } = await relay('GET', `/listings/${id}`);
             next[id] = { listing, session, note: '' };
@@ -249,11 +260,16 @@ function Mine({ boot }) {
   return (
     <section>
       <h1>My sales</h1>
-      <p className="muted">Keep this page open while a buyer is purchasing: your browser answers each protocol step automatically.</p>
+      <p className="muted">
+        Multi-copy listings complete automatically whenever this app is open on this device, on any page. Buyers
+        do not wait for you: they pre-sign immediately, and your next visit releases their keys. Older
+        single-copy listings still need this page open while a buyer is purchasing.
+      </p>
       <Notice />
       {ids.length === 0 && <p className="muted">No listings on this device. <a href="#/sell">Sell something</a>.</p>}
       <div className="grid">
         {ids.map((id) => {
+          if (mine[id].v === 2) return <SellerCardV2 key={id} id={id} entry={mine[id]} agent={agent[id]} onForget={forget} boot={boot} />;
           const l = live[id];
           const sess = l?.session;
           const stage = !sess ? 'Waiting for a buyer' : !sess.partial ? 'Buyer joined' : !sess.presig ? 'Waiting for buyer pre-signature' : !sess.signature ? 'Completing' : 'Sold';
@@ -286,7 +302,7 @@ function Listing({ id, boot }) {
   useEffect(() => { relay('GET', `/listings/${id}`).then(setData).catch((e) => setErr(e.message)); }, [id]);
 
   useEffect(() => {
-    if (!data || boot.state !== 'ready' || verify.state !== 'idle') return;
+    if (!data || data.listing.version === 2 || boot.state !== 'ready' || verify.state !== 'idle') return;
     setVerify({ state: 'run' });
     const t0 = performance.now();
     crypto('verifyOffer', { offer: data.listing.offer, contentHash: data.listing.content_hash })
@@ -349,6 +365,9 @@ function Listing({ id, boot }) {
 
   if (err && !data) return <section className="narrow"><p className="error">{err}</p></section>;
   if (!data) return <section className="narrow"><p className="muted">Loading…</p></section>;
+  if (data.listing.version === 2) {
+    return <ListingV2 data={data} boot={boot} Steps={Steps} Notice={Notice} reload={() => relay('GET', `/listings/${id}`).then(setData).catch(() => {})} />;
+  }
   const L = data.listing;
   const canBuy = verify.state === 'ok' && L.status === 'open' && !isMine && !steps;
 
