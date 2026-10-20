@@ -89,6 +89,8 @@ pub fn content_hash(payload: &[u8]) -> R<String> {
 #[derive(Serialize, Deserialize)]
 struct MerchantState { sk_b: String, secret: String, #[serde(default)] negated: bool }
 #[derive(Serialize, Deserialize)]
+struct PayerState { sk_a: String, pending_r_a: Option<String>, negated: bool }
+#[derive(Serialize, Deserialize)]
 struct PokWire { r_point: String, s: String }
 #[derive(Serialize, Deserialize)]
 struct PartialWire { r_b: String, s_b: String, t_point: String }
@@ -243,6 +245,22 @@ pub struct Payer { inner: protocol::Seller, negated: bool }
 impl Payer {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Payer { Payer { inner: protocol::Seller::new(), negated: false } }
+
+    /// SECRET device-local backup (signing share, pending nonce, negation),
+    /// for on-chain sales that span reloads. Never upload. Save it again after
+    /// every `nonce()`/`preSign()`/`refundSign()` so a used nonce is never restored.
+    #[wasm_bindgen(js_name = exportState)]
+    pub fn export_state(&self) -> String {
+        let (sk, pending) = self.inner.to_parts();
+        serde_json::to_string(&PayerState { sk_a: sc_hex(&sk), pending_r_a: pending.map(|r| sc_hex(&r)), negated: self.negated }).unwrap()
+    }
+
+    #[wasm_bindgen(js_name = fromState)]
+    pub fn from_state(json: &str) -> R<Payer> {
+        let w: PayerState = serde_json::from_str(json).map_err(|_| err("invalid payer state"))?;
+        let pending = match w.pending_r_a { Some(h) => Some(sc(&h, "nonce")?), None => None };
+        Ok(Payer { inner: protocol::Seller::from_parts(sc(&w.sk_a, "signing share")?, pending), negated: w.negated })
+    }
 
     /// Binds to the escrow key (see `Merchant::bindJoint`). Pass the
     /// merchant key as published. Returns `{ak, negated}`.
@@ -432,5 +450,7 @@ mod params_tests {
 }
 
 mod v2;
+#[cfg(feature = "chain")]
+pub mod chain;
 #[cfg(feature = "threads")]
 pub mod threads;
