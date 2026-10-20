@@ -5,7 +5,8 @@
 import { spawn } from 'node:child_process';
 
 export async function harness({ relayPort = 8790, appPort = 4180 } = {}) {
-  const { chromium } = await import(process.env.PLAYWRIGHT_CORE || 'playwright-core');
+  const pw = await import(process.env.PLAYWRIGHT_CORE || 'playwright-core');
+  const chromium = pw.chromium || pw.default.chromium;
   const relayUrl = `http://127.0.0.1:${relayPort}`;
   const relay = spawn(process.execPath, [new URL('../../relay/server.js', import.meta.url).pathname], {
     env: { ...process.env, PORT: String(relayPort), RELAY_STORAGE: 'memory', NODE_ENV: '' }, stdio: 'ignore',
