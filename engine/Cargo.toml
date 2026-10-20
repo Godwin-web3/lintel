@@ -6,7 +6,7 @@ autobins = false
 
 [features]
 default = ["multicore"]
-multicore = ["halo2_proofs/multicore"]
+multicore = ["halo2_proofs/multicore", "orchard?/multicore"]
 # On-chain settlement (NU6.3+/NU7 testnet, Ironwood pool, V6 PCZTs).
 chain = [
     "dep:orchard", "dep:pczt", "dep:zcash_primitives", "dep:zcash_protocol",
@@ -29,7 +29,7 @@ serde_json = "1"
 halo2_proofs = { version = "0.4", default-features = false, features = ["batch"] }
 halo2_gadgets = "0.6"
 # Same pasta 0.6 / ff 0.14 stack as the engine, so scalars and points are shared types.
-orchard = { version = "0.16", optional = true, features = ["circuit"] }
+orchard = { version = "0.16", optional = true, default-features = false, features = ["circuit", "std"] }
 pczt = { version = "=0.10.0-pre.2", optional = true, features = ["orchard", "signer", "prover", "io-finalizer", "tx-extractor", "zcp-builder", "spend-finalizer"] }
 zcash_primitives = { version = "=0.31.0-pre.2", optional = true, default-features = false, features = ["std", "circuits"] }
 zcash_protocol = { version = "=0.11.0-pre.1", optional = true }

@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "wasm:mt": "bash scripts/build-mt.sh",
     "bench": "node scripts/bench.mjs",
-    "test:ui": "node scripts/ui-test.mjs"
+    "test:ui": "node scripts/ui-test.mjs",
+    "wasm:chain": "cd ../../wasm && wasm-pack build --release --target web --out-dir ../web/app/src/pkg-chain --out-name lintel_chain -- --features chain"
   },
   "dependencies": {
     "react": "^18.3.1",

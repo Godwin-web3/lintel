@@ -204,6 +204,14 @@ impl Seller {
     /// Negates this signing share (see [`joint_ak`]).
     pub fn negate_share(&mut self) { self.sk_a = -self.sk_a; self.vk_a = -self.vk_a; }
 
+    /// SECRET device-local backup: the signing share and the pending
+    /// (not yet used) nonce. An on-chain sale spans several blocks, so the
+    /// payer must survive a reload. Restoring the same pending nonce twice
+    /// and signing two different messages with it would leak the share;
+    /// callers persist after every `pre_sign` (which consumes the nonce).
+    pub fn to_parts(&self) -> (Scalar, Option<Scalar>) { (self.sk_a, self.pending_r_a) }
+    pub fn from_parts(sk_a: Scalar, pending_r_a: Option<Scalar>) -> Self { Self { sk_a, vk_a: base() * sk_a, pending_r_a } }
+
     /// Completes a refund signature. The refund session is the normal
     /// protocol run with the other party's adaptor secret fixed to zero
     /// (`T` = identity, see [`Buyer::refund_partial`]), so once this party

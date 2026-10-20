@@ -50,6 +50,8 @@ The payer recovers `t` from the mined transaction, and a refund is co-signed bef
 | Sale 1 adaptor-signed settlement (t extracted from chain, content decrypted) | `8b4ada0992642b2a71649e08c8de8d0b00cdf90a46a2794d4e09ca7999a3c0a8` | 4,521,277 |
 | Sale 2 funding → escrow | `f11c111d89e870b69ade0478f7331f0e8131bac7c596846a8327832a16a235e4` | 4,521,282 |
 | Sale 2 refund (pre-signed before funding, payer alone) | `633ac619a5305b961d0d3187f26cc61f6b9211a49b3bb787a30d044aee6a3f03` | 4,521,289 |
+| Browser sale funding → escrow (both sides in the web app) | `75053762c15aea7b27fad758928fc3009ca86d5ee3a10e35b17162914c302534` | 4,522,583 |
+| Browser sale settlement (buyer's browser extracted t from chain, decrypted) | `c51697ebe0767395dee5fc54f246eccf53dc2e071f5690808ec77776939b2b67` | 4,522,588 |
 
 ```bash
 cd engine
@@ -89,10 +91,15 @@ cargo run --bin lintel-cli -- demo
 
 ## Not yet done
 
-- The browser pages still run the off-chain demo flow. The on-chain flow runs through `lintel-chain` and the
-  `testnet_sale` harness. The wasm bindings (`bindJoint`, `verifyPayerKnowledge`, `refundPartial`, `refundSign`,
-  `unlockFromTx`) and the relay's chain fields and `/chain/tx` proxy are ready for wiring.
-- The refund has no lower-bound timelock: a shielded-only tx ignores `nLockTime`. The fix is specified in
-  [docs/onchain.md](docs/onchain.md#5-refund-and-timeout).
-- Done in this branch: the reddsa SpendAuth cross-check (`apply_ironwood_signature` verifies every completed signature)
-  and testnet transactions with this flow.
+- **Browser on-chain flow covers single-copy listings only.** Multi-copy presale listings still settle off-chain
+  (no ZEC moves).
+- **The seller must be online** when a buyer starts an on-chain purchase: the seller's open app co-signs the
+  refund before the buyer funds, and later broadcasts the settlement. There is no background seller agent for
+  on-chain sales.
+- **The device wallet is minimal:** it knows only notes scanned in by txid, marks a note spent only when this
+  device funds an escrow with it, and does not detect spends made elsewhere or pick up change/payout/refund notes
+  automatically. The signed refund lives only in that browser's localStorage.
+- **Production build of the on-chain engine is unverified.** `web/app/build.sh` needs a wasm32-capable clang for
+  `secp256k1-sys`; if that build fails the app ships a stub and the on-chain panels report the engine as
+  unavailable.
+- Testnet only. Details: [docs/onchain.md](docs/onchain.md#remaining-gaps).

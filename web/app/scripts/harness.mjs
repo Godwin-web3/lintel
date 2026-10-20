@@ -13,7 +13,7 @@ export async function harness({ appPort = 4180 } = {}) {
   const relayUrl = (process.env.RELAY_URL || 'http://localhost:8787').replace(/\/$/, '');
   const relayPort = new URL(relayUrl).port || '80';
   const relay = spawn(process.execPath, [new URL('../../relay/server.js', import.meta.url).pathname], {
-    env: { ...process.env, PORT: String(relayPort), RELAY_STORAGE: 'memory', NODE_ENV: '' }, stdio: 'ignore',
+    env: { ...process.env, PORT: String(relayPort), RELAY_STORAGE: process.env.HARNESS_RELAY_STORAGE || 'memory', NODE_ENV: '' }, stdio: process.env.HARNESS_RELAY_LOG ? 'inherit' : 'ignore',
   });
   process.env.SERVE_RELAY = relayUrl;
   const { server } = await import('./serve.mjs');

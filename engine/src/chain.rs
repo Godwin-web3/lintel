@@ -599,6 +599,23 @@ pub fn witness(prev_tree_hex: &str, block_cmxs: &[[u8; 32]], target_cmx: &[u8; 3
     Ok((anchor, MerklePath::from(path)))
 }
 
+/// Witness + root cross-check + prove + extract, from public chain data only
+/// (no network access here, so the browser can run it with data fetched
+/// through any untrusted proxy). `prev_tree_hex` is `GetTreeState(h-1)`'s
+/// Ironwood tree, `block_cmxs` every Ironwood commitment of block `h` (where
+/// the spent note was mined) in order, and `at_tree_hex` `GetTreeState(h)`'s
+/// Ironwood tree; the computed anchor must equal its root. A lying source can
+/// only make this fail (or produce a transaction the network rejects).
+pub fn finalize_with(pczt: Pczt, action_index: usize, cmx: &[u8; 32], prev_tree_hex: &str, block_cmxs: &[[u8; 32]], at_tree_hex: &str) -> Result<(Vec<u8>, String)> {
+    let (anchor, path) = witness(prev_tree_hex, block_cmxs, cmx)?;
+    ensure!(!at_tree_hex.is_empty(), "no Ironwood tree for the note's block");
+    let bytes = hex::decode(at_tree_hex).context("tree hex")?;
+    let t: CommitmentTree<MerkleHashOrchard, 32> = zcash_primitives::merkle_tree::read_commitment_tree(&bytes[..]).context("read tree")?;
+    ensure!(Anchor::from(t.root()).to_bytes() == anchor.to_bytes(), "witness root does not match the chain's Ironwood root");
+    let p = install_witness(pczt, action_index, anchor, path)?;
+    prove_and_extract(p)
+}
+
 /// Installs the anchor and the escrow spend's witness (Updater role).
 pub fn install_witness(pczt: Pczt, action_index: usize, anchor: Anchor, path: MerklePath) -> Result<Pczt> {
     let p = Updater::new(pczt)

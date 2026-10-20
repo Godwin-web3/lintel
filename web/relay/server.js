@@ -25,11 +25,12 @@
 // Persistence is pluggable (see storage.js): RELAY_STORAGE=file|memory|upstash.
 
 import http from 'node:http';
-import http2 from 'node:http2';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createStorage } from './storage.js';
+import * as lwd from './lwd.js';
+export { decodeRawTransaction } from './lwd.js';
 
 const PORT = Number(process.env.PORT || 8787);
 const DATA = process.env.DATA_FILE || path.join(process.cwd(), 'data.json');
@@ -126,6 +127,7 @@ const CHAIN_FIELDS = {
   refund_terms: ['buyer', (v) => jsonStr(v, 2048)],
   refund_pczt: ['buyer', B64],
   refund_r_a: ['buyer', (v) => isHex(v, 64)],
+  settle_r_a: ['buyer', (v) => isHex(v, 64)],
   merchant_contrib: ['seller', (v) => isHex(v, 64)],
   merchant_address: ['seller', UA],
   escrow_address: ['seller', UA],
@@ -138,47 +140,24 @@ const CHAIN_FIELDS = {
 // Raw transactions from lightwalletd, so a browser can extract t from the
 // MINED settlement without trusting the relay: the payer verifies the
 // signature against the rk and sighash it signed itself.
-const LWD = process.env.LINTEL_LWD || 'https://testnet.zec.rocks:443';
 const txCache = new Map();
-function varint(n) { const out = []; while (n > 127) { out.push((n & 127) | 128); n = Math.floor(n / 128); } out.push(n); return Buffer.from(out); }
-function readVarint(b, i) { let n = 0, mul = 1, x; do { x = b[i++]; n += (x & 127) * mul; mul *= 128; } while (x & 128); return [n, i]; }
-export function decodeRawTransaction(buf) {
-  let i = 0, data = null, height = 0;
-  while (i < buf.length) {
-    const [key, j] = readVarint(buf, i); i = j;
-    const field = Math.floor(key / 8), wire = key & 7;
-    if (wire === 2) { const [len, k] = readVarint(buf, i); i = k; if (field === 1) data = buf.subarray(i, i + len); i += len; }
-    else if (wire === 0) { const [v, k] = readVarint(buf, i); i = k; if (field === 2) height = v; }
-    else throw new Error('unexpected protobuf wire type');
-  }
-  return { data, height };
+const chainCache = new Map(); // `${kind}:${height}` -> value, for heights well below the tip
+const cached = async (key, fn) => {
+  if (chainCache.has(key)) return chainCache.get(key);
+  const v = await fn();
+  if (chainCache.size > 2000) chainCache.clear();
+  chainCache.set(key, v);
+  return v;
+};
+let tipCache = { at: 0, height: 0 };
+async function tip() {
+  if (Date.now() - tipCache.at < 15000) return tipCache.height;
+  tipCache = { at: Date.now(), height: await lwd.latestHeight() };
+  return tipCache.height;
 }
-export function fetchRawTx(txidHex, lwd = LWD) {
-  const hash = Buffer.from(txidHex, 'hex').reverse(); // display -> protocol byte order
-  const msg = Buffer.concat([Buffer.from([0x1a]), varint(hash.length), hash]); // TxFilter.hash = field 3
-  const frame = Buffer.concat([Buffer.from([0, 0, 0, 0, 0]), msg]);
-  frame.writeUInt32BE(msg.length, 1);
-  return new Promise((resolve, reject) => {
-    const c = http2.connect(lwd);
-    const done = (e, v) => { c.close(); e ? reject(e) : resolve(v); };
-    c.on('error', (e) => done(e));
-    const req = c.request({ ':method': 'POST', ':path': '/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetTransaction', 'content-type': 'application/grpc', te: 'trailers' });
-    const chunks = []; let status = null, message = '';
-    req.setTimeout(15000, () => { req.close(); done(new Error('lightwalletd timeout')); });
-    req.on('response', (h) => { if (h['grpc-status'] !== undefined) { status = h['grpc-status']; message = h['grpc-message'] || ''; } });
-    req.on('trailers', (t) => { status = t['grpc-status']; message = t['grpc-message'] || ''; });
-    req.on('data', (d) => chunks.push(d));
-    req.on('end', () => {
-      if (status !== null && status !== undefined && String(status) !== '0') return done(new Bad(`lightwalletd: ${decodeURIComponent(message) || 'error ' + status}`, 404));
-      const b = Buffer.concat(chunks);
-      if (b.length < 5) return done(new Bad('transaction not found', 404));
-      const { data, height } = decodeRawTransaction(b.subarray(5, 5 + b.readUInt32BE(1)));
-      if (!data) return done(new Bad('transaction not found', 404));
-      done(null, { txid: txidHex, height, mined: height > 0 && height < 0xffffffff, data: data.toString('hex') });
-    });
-    req.end(frame);
-  });
-}
+const fetchRawTx = (txid) => lwd.rawTx(txid);
+const lwdErr = (e) => { if (e instanceof lwd.LwdError) throw new Bad(e.message, e.code); throw e; };
+const HEIGHT = (h) => { const n = Number(h); need(Number.isInteger(n) && n > 0 && n < 2 ** 31, 'bad height'); return n; };
 
 // ---- routes ----
 const routes = [
@@ -231,18 +210,25 @@ const routes = [
     need(l.version !== 2, 'presale listings use /units/:i/orders');
     if (l.session_id) {
       const s = db.sessions[l.session_id];
-      const stale = !s.presig && Date.now() - s.created_at > 15 * 60 * 1000;
+      // an on-chain sale whose escrow was funded is never stale (the buyer's money is in it)
+      const stale = !s.presig && !s.chain?.funding_txid && Date.now() - s.created_at > 15 * 60 * 1000;
       if (!stale) throw new Bad('listing already has a buyer', 409);
       delete db.sessions[l.session_id];
     }
     need(isHex(body.payer_vk, 64), 'payer_vk must be 32-byte hex');
-    need(isHex(body.r_a, 64), 'r_a must be 32-byte hex');
-    need(isHex(body.alpha, 64), 'alpha must be 32-byte hex');
-    need(isHex(body.sighash) && body.sighash.length <= 128, 'sighash must be hex (max 64 bytes)');
+    // mode 'chain': settlement on Zcash testnet. The signing nonce, alpha and
+    // sighash are not known yet (they come from the agreed PCZTs later), so
+    // they are absent here and exchanged through /chain/:field.
+    const chainMode = body.mode === 'chain';
+    if (!chainMode) {
+      need(isHex(body.r_a, 64), 'r_a must be 32-byte hex');
+      need(isHex(body.alpha, 64), 'alpha must be 32-byte hex');
+      need(isHex(body.sighash) && body.sighash.length <= 128, 'sighash must be hex (max 64 bytes)');
+    }
     const tok = token();
     const s = {
-      id: id(), listing_id: lid, created_at: Date.now(),
-      payer_vk: body.payer_vk, r_a: body.r_a, alpha: body.alpha, sighash: body.sighash,
+      id: id(), listing_id: lid, created_at: Date.now(), mode: chainMode ? 'chain' : 'relay',
+      payer_vk: body.payer_vk, r_a: chainMode ? null : body.r_a, alpha: chainMode ? null : body.alpha, sighash: chainMode ? null : body.sighash,
       partial: null, merchant_pok: null, presig: null, signature: null,
       buyer_token_hash: hashTok(tok),
     };
@@ -259,6 +245,7 @@ const routes = [
     const s = db.sessions[sid]; if (!s) throw new Bad('not found', 404);
     if (!tokOk(auth, db.listings[s.listing_id].seller_token_hash)) throw new Bad('seller token required', 401);
     need(!s.partial, 'partial already set');
+    if (s.mode === 'chain') need(s.chain?.settle_r_a && s.chain?.settle_pczt, 'on-chain session: settlement PCZT and nonce first');
     need(jsonStr(body.partial, 1024) && jsonStr(body.merchant_pok, 1024), 'partial and merchant_pok must be JSON');
     s.partial = body.partial; s.merchant_pok = body.merchant_pok; save();
     return { session: publicSession(s) };
@@ -291,9 +278,34 @@ const routes = [
   ['GET', /^\/chain\/tx\/([0-9a-f]{64})$/, async ([txid]) => {
     const hit = txCache.get(txid);
     if (hit) return hit;
-    const r = await fetchRawTx(txid);
+    const r = await fetchRawTx(txid).catch(lwdErr);
     if (r.mined) { if (txCache.size > 500) txCache.clear(); txCache.set(txid, r); }
     return r;
+  }],
+
+  // Public chain data for in-browser settlement (all of it is on chain anyway;
+  // a lying relay can only make a proof or broadcast fail, never move funds:
+  // the browser cross-checks the witness root against GetTreeState(h)).
+  ['GET', /^\/chain\/height$/, async () => ({ height: await tip().catch(lwdErr) })],
+  ['GET', /^\/chain\/tree\/(\d+)$/, async ([h]) => {
+    const n = HEIGHT(h);
+    const t = n + 10 < await tip().catch(lwdErr) ? await cached(`tree:${n}`, () => lwd.treeState(n)).catch(lwdErr) : await lwd.treeState(n).catch(lwdErr);
+    return { height: t.height, ironwood_tree: t.ironwood_tree };
+  }],
+  ['GET', /^\/chain\/cmxs\/(\d+)$/, async ([h]) => {
+    const n = HEIGHT(h);
+    return n + 10 < await tip().catch(lwdErr) ? cached(`cmxs:${n}`, () => lwd.blockCmxs(n)).catch(lwdErr) : lwd.blockCmxs(n).catch(lwdErr);
+  }],
+  // Broadcasts a fully signed and proven transaction (public bytes). The
+  // node, not the relay, decides validity (proofs, signatures, lock time).
+  ['POST', /^\/chain\/broadcast$/, async (_, body) => {
+    need(isHex(body.tx) && body.tx.length <= 60000, 'tx must be hex (max 30,000 bytes)');
+    const r = await lwd.sendTx(body.tx).catch(lwdErr);
+    // lightwalletd: error_code 0 and the txid (or nothing) as message on
+    // success; the testnet server returns the txid JSON-quoted ("…").
+    const msg = r.error_message.trim().replace(/^"|"$/g, '');
+    const accepted = r.error_code === 0 && (msg === '' || /^[0-9a-f]{64}$/.test(msg));
+    return { accepted, error_code: r.error_code, error_message: r.error_message };
   }],
 
   ['POST', /^\/sessions\/([\w-]+)\/signature$/, ([sid], body, auth) => {
@@ -301,6 +313,7 @@ const routes = [
     const l = db.listings[s.listing_id];
     if (!tokOk(auth, l.seller_token_hash)) throw new Bad('seller token required', 401);
     need(s.presig && !s.signature, 'not expecting a signature');
+    need(s.mode !== 'chain', 'on-chain session: broadcast the settlement and post settle_txid instead');
     need(isHex(body.signature, 128), 'signature must be 64-byte hex');
     s.signature = body.signature; l.status = 'sold'; save();
     return { session: publicSession(s) };

@@ -1,0 +1,13 @@
+{
+  "network": "testnet",
+  "listing_id": "XpOyPOgiqhJW",
+  "funding_txid": "90446dccc95818de8808046167985311e0a6715c3580fa0de9fd24a41f8c9842",
+  "refund_txid": "992163c4a20b3cc2e363b3720aeac8f25162c81bc795736d285b0b1bd3e43392",
+  "n_lock_time": 4522631,
+  "funding_height": 4522575,
+  "refund_height": 4522635,
+  "refund_value_zats": 2005000,
+  "finished": "2026-10-20T16:20:32.765Z",
+  "note": "Escrow of browser attempt 1 (funding mined but reported rejected by the app because of the quoted-txid bug; never settled). Refund was co-signed by the seller browser before funding, time-locked (nLockTime) until after block 4522631, finalized with lintel-chain finalize and broadcast via web/app/scripts/refund-from-state.mjs. The node answered \"transaction already exists in mempool\" (an earlier submission of the same bytes); the script then confirmed it on chain.",
+  "refund_returns": "escrow less the ZIP 317 fee to the buyer, plus the 20,000-zat lock coin"
+}

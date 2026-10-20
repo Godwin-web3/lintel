@@ -116,15 +116,8 @@ impl Lwd {
         ensure!(height > 0, "note is not mined yet; wait for a confirmation");
         let prev = self.tree(height - 1).await?;
         let cmxs = self.block_cmxs(height).await?;
-        let (anchor, path) = chain::witness(&prev.ironwood_tree, &cmxs, cmx)?;
         let at = self.tree(height).await?;
-        ensure!(!at.ironwood_tree.is_empty(), "node returned no Ironwood tree");
-        let bytes = hex::decode(&at.ironwood_tree)?;
-        let t: incrementalmerkletree::frontier::CommitmentTree<orchard::tree::MerkleHashOrchard, 32> =
-            zcash_primitives::merkle_tree::read_commitment_tree(&bytes[..])?;
-        ensure!(orchard::Anchor::from(t.root()).to_bytes() == anchor.to_bytes(), "witness root does not match the chain's Ironwood root");
-        let p = chain::install_witness(p, index, anchor, path)?;
-        chain::prove_and_extract(p)
+        chain::finalize_with(p, index, cmx, &prev.ironwood_tree, &cmxs, &at.ironwood_tree)
     }
 
     /// Waits until `txid` is mined; returns `(raw, height)`.

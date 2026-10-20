@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { crypto, relay, store, randomHex, randomAlpha, sleep, RELAY } from './api.js';
 import { sellV2, startSellerAgent, MAX_COPIES } from './presale.js';
 import { ListingV2, SellerCardV2, Purchases, copiesLabel } from './Presale.jsx';
+import { WalletPanel, OnchainBuy } from './Onchain.jsx';
+import { advanceSeller } from './onchain.js';
 
 // ---------- tiny hash router ----------
 function useRoute() {
@@ -39,8 +41,9 @@ function Notice() {
   return (
     <div className="notice">
       <b>Experimental.</b> Proofs, adaptor signatures and decryption are real and run on your device.
-      Settlement is not on-chain yet: the completed signature is exchanged through the relay instead of
-      inside a broadcast Zcash transaction, and no ZEC moves.
+      Multi-copy listings still settle off-chain (the completed signature goes through the relay; no ZEC moves).
+      Single-copy listings can settle <b>on Zcash testnet</b>: escrow, time-locked refund and an adaptor-signed
+      settlement built, proven and checked in your browser, with the key taken from the mined transaction.
     </div>
   );
 }
@@ -66,6 +69,7 @@ export default function App() {
   if (route[0] === 'sell') page = <Sell boot={boot} />;
   else if (route[0] === 'listing' && route[1]) page = <Listing id={route[1]} boot={boot} />;
   else if (route[0] === 'mine') page = <Mine boot={boot} agent={agent} />;
+  else if (route[0] === 'wallet') page = <WalletPanel boot={boot} />;
   else page = <Market />;
 
   return (
@@ -78,6 +82,7 @@ export default function App() {
           <a href="#/" className={!route[0] ? 'on' : ''}>Market</a>
           <a href="#/sell" className={route[0] === 'sell' ? 'on' : ''}>Sell</a>
           <a href="#/mine" className={route[0] === 'mine' ? 'on' : ''}>My sales</a>
+          <a href="#/wallet" className={route[0] === 'wallet' ? 'on' : ''}>Wallet</a>
         </nav>
         <span className={`engine ${boot.state}`} title={boot.error || ''}>
           {boot.state === 'loading' && 'Loading prover…'}
@@ -139,7 +144,7 @@ function Market() {
 
 // ---------- sell ----------
 function Sell({ boot }) {
-  const [form, setForm] = useState({ title: '', description: '', price: '', text: '', copies: '1' });
+  const [form, setForm] = useState({ title: '', description: '', price: '', text: '', copies: '1', onchain: false });
   const [file, setFile] = useState(null);
   const [steps, setSteps] = useState(null);
   const [err, setErr] = useState('');
@@ -151,6 +156,7 @@ function Sell({ boot }) {
   async function submit(e) {
     e.preventDefault();
     setErr('');
+    if (form.onchain) return submitOnchain();
     const copies = Math.max(1, Math.min(MAX_COPIES, Number(form.copies) || 1));
     const s = [[`Seal ${copies} cop${copies > 1 ? 'ies' : 'y'}, each under its own secret, with Halo 2 proofs`, 'run'], ['Publish to relay and keep seller keys on this device', 'wait']];
     setSteps([...s]);
@@ -176,6 +182,30 @@ function Sell({ boot }) {
     }
   }
 
+  // Single copy, settled on Zcash testnet (v1 listing; the buyer funds an escrow).
+  async function submitOnchain() {
+    const s = [['Seal with a Halo 2 proof (single copy)', 'run'], ['Publish to relay and keep seller keys on this device', 'wait']];
+    setSteps([...s]);
+    try {
+      const payload = await payloadBytes();
+      if (payload.length > (boot.maxPayload || 1953)) throw new Error(`on-chain listings hold up to ${boot.maxPayload || 1953} bytes`);
+      const t0 = performance.now();
+      const r = await crypto('seal', { payload });
+      s[0] = [s[0][0], 'done', `${((performance.now() - t0) / 1000).toFixed(1)}s on this device`]; s[1][1] = 'run'; setSteps(s.map((x) => [...x]));
+      const { listing, seller_token } = await relay('POST', '/listings', {
+        title: form.title.trim(), description: form.description.trim(), price_zec: form.price.trim(), filename: file?.name,
+        content_hash: r.contentHash, merchant_vk: r.merchantVk, t_point: r.tPoint, offer: r.offer, size: payload.length,
+      });
+      store.put((st) => { st.selling[listing.id] = { title: listing.title, state: r.state, token: seller_token, onchain: true }; });
+      s[1][1] = 'done'; setSteps(s.map((x) => [...x]));
+      setTimeout(() => go(`/mine`), 600);
+    } catch (e2) {
+      const i = s.findIndex((x) => x[1] === 'run');
+      if (i >= 0) s[i][1] = 'fail';
+      setSteps([...s]); setErr(e2.message);
+    }
+  }
+
   const busy = steps && steps.some((x) => x[1] === 'run');
   return (
     <section className="narrow">
@@ -189,7 +219,8 @@ function Sell({ boot }) {
         <label>Title<input required maxLength={120} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Critical bug report: Acme vault" /></label>
         <label>Public description<textarea maxLength={2000} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What the buyer gets, without giving it away" /></label>
         <label>Price (ZEC)<input required inputMode="decimal" pattern="\d{1,8}(\.\d{1,8})?" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0.5" /></label>
-        <label>Copies for sale<input type="number" min={1} max={MAX_COPIES} value={form.copies} onChange={(e) => setForm({ ...form, copies: e.target.value })} /></label>
+        <label className="check"><input type="checkbox" checked={form.onchain} onChange={(e) => setForm({ ...form, onchain: e.target.checked })} /> Settle on Zcash testnet (single copy, price in TAZ, up to {fmtBytes(boot.maxPayload || 1953)}; keep My sales open while a buyer pays)</label>
+        {!form.onchain && <label>Copies for sale<input type="number" min={1} max={MAX_COPIES} value={form.copies} onChange={(e) => setForm({ ...form, copies: e.target.value })} /></label>}
         <label>Secret content
           <textarea className="mono" rows={6} disabled={!!file} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Paste the secret text here, or attach a small file below" />
         </label>
@@ -227,7 +258,11 @@ function Mine({ boot, agent = {} }) {
           try {
             const { listing, session } = await relay('GET', `/listings/${id}`);
             next[id] = { listing, session, note: '' };
-            if (session && !busy.current.has(id)) {
+            if (session && session.mode === 'chain' && !busy.current.has(id)) {
+              busy.current.add(id);
+              try { next[id].note = await advanceSeller(id, store.get().selling[id], listing, session); } catch (e) { next[id].note = e.message; }
+              busy.current.delete(id);
+            } else if (session && !busy.current.has(id)) {
               busy.current.add(id);
               try {
                 if (!session.partial) {
@@ -272,7 +307,7 @@ function Mine({ boot, agent = {} }) {
           if (mine[id].v === 2) return <SellerCardV2 key={id} id={id} entry={mine[id]} agent={agent[id]} onForget={forget} boot={boot} />;
           const l = live[id];
           const sess = l?.session;
-          const stage = !sess ? 'Waiting for a buyer' : !sess.partial ? 'Buyer joined' : !sess.presig ? 'Waiting for buyer pre-signature' : !sess.signature ? 'Completing' : 'Sold';
+          const stage = sess?.mode === 'chain' ? (sess.chain?.settle_txid ? 'Settled on chain' : 'On-chain sale in progress') : !sess ? 'Waiting for a buyer' : !sess.partial ? 'Buyer joined' : !sess.presig ? 'Waiting for buyer pre-signature' : !sess.signature ? 'Completing' : 'Sold';
           return (
             <div key={id} className="card">
               <div className="row"><b>{mine[id].title}</b>{l?.listing && <span className="price">{l.listing.price_zec} ZEC</span>}</div>
@@ -369,7 +404,13 @@ function Listing({ id, boot }) {
     return <ListingV2 data={data} boot={boot} Steps={Steps} Notice={Notice} reload={() => relay('GET', `/listings/${id}`).then(setData).catch(() => {})} />;
   }
   const L = data.listing;
-  const canBuy = verify.state === 'ok' && L.status === 'open' && !isMine && !steps;
+  const chainActive = store.get().buying[id]?.mode === 'chain';
+  const canBuy = verify.state === 'ok' && L.status === 'open' && !isMine && !steps && !chainActive;
+  const onchainDone = (bytes) => {
+    relay('GET', `/listings/${id}`).then(setData).catch(() => {});
+    const text = (() => { try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return null; } })();
+    setResult({ bytes, text, name: L.filename || `${L.title.replace(/[^\w-]+/g, '_')}.txt` });
+  };
 
   return (
     <section className="narrow">
@@ -392,8 +433,11 @@ function Listing({ id, boot }) {
 
       <Notice />
       {isMine && <p className="muted">This is your listing. Keep <a href="#/mine">My sales</a> open to serve buyers.</p>}
-      {canBuy && <button className="btn" onClick={buy}>Buy for {L.price_zec} ZEC</button>}
-      {L.status !== 'open' && !steps && !isMine && <p className="muted">This listing already has a buyer.</p>}
+      {canBuy && <button className="btn ghost" onClick={buy}>Buy off-chain demo (no ZEC moves)</button>}
+      {!isMine && !steps && verify.state === 'ok' && (L.status === 'open' || chainActive) && !result && (
+        <OnchainBuy listing={L} verifiedT={verify.t} boot={boot} onDone={onchainDone} />
+      )}
+      {L.status !== 'open' && !steps && !isMine && !chainActive && <p className="muted">This listing already has a buyer.</p>}
       {steps && <Steps steps={steps} />}
       {steps && !result && !err && <p className="muted small">Keep this tab open until the content unlocks.</p>}
       {err && <p className="error">{err}</p>}

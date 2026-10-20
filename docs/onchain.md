@@ -1,7 +1,9 @@
 # On-chain settlement on Zcash testnet
 
-Status: **working end to end on the public testnet**, driven from the CLI.
-The browser has the bindings for it but does not yet run the on-chain flow by itself.
+Status: **working end to end on the public testnet**, from the CLI and, for single-copy
+(v1) listings, from the browser app (two browsers + relay, no CLI). Multi-copy presale
+listings still settle off-chain. Limits of the browser flow are listed under
+[Browser flow](#browser-flow-single-copy-listings) and [Remaining gaps](#remaining-gaps).
 
 Network facts this is built against: testnet is on NU7, consensus branch `0x77190ad9`
 (activated at height 4,465,026). Shielded value lives in the **Ironwood** pool (NU6.3+), and
@@ -52,6 +54,61 @@ $B/examples/testnet_sale demo settle    # or: refund
 `testnet_sale` is a demo harness. It runs both parties in one process so one command
 reproduces a sale. They still exchange only public messages, and no share, `t` or plaintext is
 printed. In the product, each side signs in its own browser through lintel-wasm.
+
+## Browser flow (single-copy listings)
+
+A seller ticks "Settle on Zcash testnet" when listing. A buyer with a funded device wallet
+(Wallet page: create or import a key, then scan a txid that paid it) clicks "Buy on-chain".
+Each browser runs its own half with the on-chain engine (`wasm/` with feature `chain`,
+loaded as `src/pkg-chain` in a worker); they talk only through the relay's write-once
+session fields, and chain data goes through the relay's lightwalletd proxy
+(`/chain/height`, `/chain/tree/:h`, `/chain/cmxs/:h`, `/chain/tx/:txid`, `/chain/broadcast`).
+Order: joint key → buyer builds funding + time-locked refund → seller co-signs the refund →
+buyer broadcasts funding → seller builds the settlement → adaptor signing → seller proves and
+broadcasts the settlement → buyer reads the mined settlement, extracts `t`, decrypts.
+Proving and full verification run in the browser.
+
+**Live run (2026-10-20, Zcash testnet, both sides driven through the UI in headless Chromium,
+`web/app/scripts/onchain-live.mjs`, local relay proxying the public testnet lightwalletd):**
+
+| What | txid | Height |
+| --- | --- | --- |
+| Funding (buyer device wallet → joint escrow, price 0.02 TAZ, + 20,000-zat lock coin) | `75053762c15aea7b27fad758928fc3009ca86d5ee3a10e35b17162914c302534` | 4,522,583 |
+| Settlement (seller browser, adaptor-signed; expiry 4,522,639) | `c51697ebe0767395dee5fc54f246eccf53dc2e071f5690808ec77776939b2b67` | 4,522,588 |
+| Earlier attempt: funding (mined, never settled) | `90446dccc95818de8808046167985311e0a6715c3580fa0de9fd24a41f8c9842` | 4,522,575 |
+| Earlier attempt: pre-signed time-locked refund (lock 4,522,631) | `992163c4a20b3cc2e363b3720aeac8f25162c81bc795736d285b0b1bd3e43392` | 4,522,635 |
+
+The buyer's browser fetched the mined settlement, recovered `t` from its spend-auth
+signature, and the decrypted payload matched the sealed secret (`decrypted_matches: true`).
+The relay never held a completed signature (`relay_saw_signature: false`). Record:
+[`testnet/evidence-browser-settle.json`](testnet/evidence-browser-settle.json).
+
+An earlier browser attempt the same day (listing `XpOyPOgiqhJW`) **did** get its funding
+mined (`90446dccc95818de8808046167985311e0a6715c3580fa0de9fd24a41f8c9842`, height 4,522,575),
+but the app reported the broadcast as rejected: testnet lightwalletd returns the txid
+JSON-quoted on success and the relay did not accept that form. Fixed in the relay (quoted txid =
+accepted) and in the app (on a rejection, a txid the node already knows counts as broadcast).
+That sale never settled; its escrow is recovered with the pre-signed time-locked refund via
+`web/app/scripts/refund-from-state.mjs` after its lock: refund `992163c4a20b3cc2e363b3720aeac8f25162c81bc795736d285b0b1bd3e43392` mined at height 4,522,635 (nLockTime 4,522,631). Record: [`testnet/evidence-browser-refund.json`](testnet/evidence-browser-refund.json).
+
+Browser-flow limits (as of this branch):
+
+- **The seller must be online when a buyer starts.** The refund is co-signed by the seller's
+  open app *before* the buyer funds; with the seller offline the buyer waits and nothing is
+  funded. The seller must also stay online to settle before the settlement expiry, or the buyer
+  takes the refund after it. There is no seller agent for on-chain sales.
+- **Presale (multi-copy, v2) listings are not wired on-chain.** They still settle off-chain.
+- **The device wallet is minimal.** It only knows notes you scan in by txid; it marks a note
+  spent only when this device funds an escrow with it. It does not scan the chain for spends
+  made elsewhere (e.g. the same key imported on two devices), and it does not add change,
+  refund or payout notes automatically — scan their txids. Funding needs one note that covers
+  escrow + lock coin + fee.
+- **Recovery is local.** The signed refund and the wallet key live only in that browser's
+  localStorage. Clearing it before broadcasting the refund loses the escrow (testnet funds).
+- **Production build unverified.** `web/app/build.sh` builds the on-chain engine with
+  `wasm-pack --features chain`; `secp256k1-sys` needs a clang that targets wasm32. The script
+  tries to install clang; if the build fails it ships a stub and the on-chain panels say the
+  engine is unavailable. A Vercel build with the on-chain engine has not been verified.
 
 ## Item by item
 
@@ -263,12 +320,14 @@ Other refund caveats:
 
 ## Tests
 
-| Suite | Result | Command |
+| Suite | Result (2026-10-20, branch `wire-onchain`) | Command |
 | --- | --- | --- |
-| Engine lib | 20 passed (the original 17 plus 3 new protocol tests: joint key normalization, refund completion and locked-partial rejection, signature search in bytes) | `cargo test --release --lib` |
-| Engine integration (`tests/settlement.rs`) | 1 passed, about 37 s (details below, including the v2 refund time lock) | `cargo test --release --features net,inject --test settlement` |
-| wasm | 3 passed (the 2 existing plus 1 new: joint binding, both proofs of knowledge, refund signing, unlock from transaction bytes) | `cargo test --release` in `wasm/` |
-| Relay | 4 passed (the 2 existing plus on-chain fields and protobuf decoding) | `node --test` in `web/relay` |
+| Engine, feature `chain` | lib 28 passed; `tests/settlement.rs` 1 passed (~22 s) | `cargo test --release --features chain` in `engine/` |
+| Engine, feature `net` (adds the lightwalletd client) | lib 28 passed; settlement 1 passed | `cargo test --release --features net` in `engine/` |
+| wasm | 4 passed | `cargo test --release` in `wasm/` |
+| wasm, feature `chain` | 5 passed (adds `chain::tests::browser_settlement_and_time_locked_refund_offline`: funding, v2 time-locked refund co-signed before funding, adaptor-signed settlement, proving + verification, `t` recovered from the raw settlement, all through the browser bindings) | `cargo test --release --features chain` in `wasm/` |
+| Relay | 13 passed (incl. chain proxy: height/tree/cmxs/broadcast, JSON-quoted txid accepted, node error = rejected; chain-mode sessions) | `node --test` in `web/relay` |
+| Live, browser | 1 sale settled on testnet (table above) | `node scripts/onchain-live.mjs` in `web/app` |
 
 The integration test covers the whole flow offline:
 
@@ -292,11 +351,11 @@ The integration test covers the whole flow offline:
 
 ## Remaining gaps
 
-- **Browser UI.** The browser does not yet run the on-chain flow end to end. The wasm bindings
-  (`bindJoint`, `verifyPayerKnowledge`, `refundPartial`, `refundSign`, `unlockFromTx`), the
-  worker operations, the relay's write-once `/sessions/:id/chain/:field` fields and the
-  `/chain/tx/:txid` proxy are in place. The pages still run the off-chain demo flow with
-  placeholder `sighash`/`alpha`, and proving and broadcasting need the CLI.
+- **Browser UI.** Single-copy listings run on-chain in the browser (see
+  [Browser flow](#browser-flow-single-copy-listings)), with its limits: seller must be online
+  to co-sign the refund before funding, presale listings not wired, minimal wallet that does
+  not track spends made elsewhere, refund kept only in localStorage, and the production
+  (Vercel) build of the on-chain engine unverified (needs clang; stub fallback).
 - **Refund timelock:** implemented (item 5, v2). The `lintel-chain` CLI subcommands accept
   the new `lock`/`t_out` terms fields through JSON. There is no CLI subcommand yet to create
   or sign a transparent key; the `testnet_sale` harness does it.
