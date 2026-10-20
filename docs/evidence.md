@@ -18,3 +18,15 @@ See `engine/src/bin/lintel-inject.rs`. It:
 2. Gets the real shielded sighash via `Signer::shielded_sighash()`
 3. Calls the CLI with that sighash and the per-action alpha
 4. Injects the completed signature with `apply_ironwood_signature`
+
+## Two-party escrow on Ironwood (branch `onchain-settlement`)
+
+| Description | txid | Height |
+|-------------|------|--------|
+| Funding: payer → joint escrow (`ak = vk_payer + vk_merchant`) | `da340dee5bb4a8ec11872d184c884b38aabfba3060a68e76d17df32628d6cf91` | 4,521,270 |
+| Settlement: escrow → merchant, adaptor-signed over the real sighash/alpha; payer extracted `t` from this tx | `8b4ada0992642b2a71649e08c8de8d0b00cdf90a46a2794d4e09ca7999a3c0a8` | 4,521,277 |
+| Funding (second sale) | `f11c111d89e870b69ade0478f7331f0e8131bac7c596846a8327832a16a235e4` | 4,521,282 |
+| Refund: pre-signed before funding, broadcast by the payer alone | `633ac619a5305b961d0d3187f26cc61f6b9211a49b3bb787a30d044aee6a3f03` | 4,521,289 |
+
+These are not self-spends: the escrow note belongs to the joint key, and neither party could spend it alone.
+Public records: `docs/testnet/evidence-*.json`. Details: `docs/onchain.md`.
