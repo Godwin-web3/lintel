@@ -8,7 +8,7 @@
 import { harness, sell } from './harness.mjs';
 
 const secret = 'UI-E2E secret: '.padEnd(2400, '#') + ' END'; // 2 proof parts
-const { browser, app, relayUrl, close } = await harness({ relayPort: 8791, appPort: 4181 });
+const { browser, app, relayUrl, close } = await harness({ appPort: 4181 });
 const ok = (c, m) => { if (!c) throw new Error('FAILED: ' + m); console.log('ok -', m); };
 try {
   const sellerCtx = await browser.newContext();
