@@ -12,13 +12,16 @@
 //! <dir> must hold `payer-wallet.json` (from `lintel-chain wallet`) and
 //! `payer-source-note.json` (from `lintel-chain scan --wallet ...`) for a
 //! funded Ironwood note. Writes `evidence-<mode>.json` and
-//! `payer-change-note.json` (the next run's source note).
+//! `payer-change-note.json` (the next run's source note). Creates
+//! `payer-tkey.json` (the payer's transparent key for the refund's lock
+//! input) on first use. Both modes also try the refund before its lock height
+//! and record the node's rejection (v2 time lock).
 
 use std::fs;
 
 use anyhow::{anyhow, ensure, Result};
 use group::GroupEncoding;
-use lintel::chain::{self, JointKeyInfo, NoteRecord, SpendTerms};
+use lintel::chain::{self, JointKeyInfo, NoteRecord, RefundLock, SpendTerms, TransparentKey, TransparentOut};
 use lintel::lwd::Lwd;
 use lintel::protocol::{self, parse_scalar, Buyer as Merchant, Seller as Payer};
 use lintel::sealed;
@@ -62,6 +65,19 @@ async fn main() -> Result<()> {
     let payer_sk = Option::<SpendingKey>::from(SpendingKey::from_bytes(hex::decode(w["sk"].as_str().unwrap())?.try_into().unwrap())).unwrap();
     let payer_fvk = FullViewingKey::from(&payer_sk);
     let payer_ua = chain::encode_ua(&payer_fvk.address_at(0u32, Scope::External));
+    let tkey_path = format!("{dir}/payer-tkey.json");
+    let payer_tkey = match fs::read(&tkey_path) {
+        Ok(b) => {
+            let v: serde_json::Value = serde_json::from_slice(&b)?;
+            TransparentKey::from_bytes(hex::decode(v["tsk"].as_str().unwrap())?.try_into().unwrap())?
+        }
+        Err(_) => {
+            let k = TransparentKey::random();
+            fs::write(&tkey_path, serde_json::to_string(&json!({ "tsk": hex::encode(k.to_bytes()) }))?)?;
+            k
+        }
+    };
+    let payer_taddr = payer_tkey.address();
     let merchant_payout = SpendingKey::from_bytes(rand::random()).into_option().ok_or_else(|| anyhow!("retry"))?;
     let merchant_ua = chain::encode_ua(&FullViewingKey::from(&merchant_payout).address_at(0u32, Scope::External));
 
@@ -99,7 +115,12 @@ async fn main() -> Result<()> {
 
     // ---- funding tx (payer), built and proven but NOT broadcast yet
     let tip = l.latest().await?;
-    let fund_terms = SpendTerms { kind: "fund".into(), pay_to: escrow_ua.clone(), amount: ESCROW, change_to: Some(payer_ua.clone()), target_height: tip + 1, expiry_height: tip + 40 };
+    // Claim window, fixed before funding: the settlement expires at
+    // SETTLE_EXPIRY and the refund is locked until LOCK (= SETTLE_EXPIRY).
+    let settle_expiry = if mode == "refund" { tip + 10 } else { tip + 40 };
+    let lock_height = settle_expiry;
+    let fund_terms = SpendTerms { kind: "fund".into(), pay_to: escrow_ua.clone(), amount: ESCROW, change_to: Some(payer_ua.clone()), target_height: tip + 1, expiry_height: tip + 40,
+        lock: None, t_out: Some(TransparentOut { address: payer_taddr.clone(), value: chain::LOCK_UTXO_VALUE }) };
     let src_note = src.note()?;
     let p = chain::build_spend(&payer_fvk, &src_note, &fund_terms)?;
     let idx = chain::spend_index(&p, &payer_fvk, &src_note)?;
@@ -109,13 +130,16 @@ async fn main() -> Result<()> {
     log("fund-built", json!({ "txid": fund_txid, "escrow_value": escrow.note.value().inner() }));
 
     // ---- refund co-signed BEFORE funding is broadcast (v6: anchor deferred)
-    let refund_terms = SpendTerms { kind: "refund".into(), pay_to: payer_ua.clone(), amount: chain::max_payout(ESCROW), change_to: None, target_height: tip + 1, expiry_height: 0 };
+    let refund_terms = SpendTerms { kind: "refund".into(), pay_to: payer_ua.clone(), amount: chain::refund_payout(ESCROW), change_to: None, target_height: tip + 1, expiry_height: 0,
+        t_out: None, lock: Some(RefundLock { txid: fund_txid.clone(), vout: 0, value: chain::LOCK_UTXO_VALUE, address: payer_taddr.clone(), lock_height }) };
+    chain::check_refund_window(&refund_terms, settle_expiry)?; // merchant
     let refund = chain::build_spend(&joint, &escrow.note, &refund_terms)?;
     let r_info = chain::check_spend(&refund, &joint, &escrow.note, &refund_terms)?; // payer
     let r_info_m = chain::check_spend(&refund, &joint, &escrow.note, &refund_terms)?; // merchant
     ensure!(r_info.sighash == r_info_m.sighash);
     let (r_sig, _, _) = sign(&mut payer, &merchant, &r_info, session.as_bytes(), true)?;
     let refund = chain::apply_signature(refund, r_info.action_index, r_sig)?;
+    let refund = chain::sign_lock_input(refund, &payer_tkey)?; // payer's own lock coin
     wr("refund-signed.pczt", &chain::pczt_to_bytes(refund)?)?;
     log("refund-presigned", json!({ "txid": r_info.txid, "sighash": r_info.sighash, "rk": r_info.rk }));
 
@@ -135,22 +159,45 @@ async fn main() -> Result<()> {
         "network": "testnet", "branch": format!("{:08x}", u32::from(chain::branch_for(fund_h))), "pool": "Ironwood", "tx_version": "v6",
         "escrow_address": escrow_ua, "joint_ak": hex::encode(ak.to_bytes()),
         "funding": { "txid": fund_txid, "height": fund_h, "escrow_value": ESCROW },
-        "refund_presigned_before_funding": { "txid": r_info.txid, "sighash": r_info.sighash, "rk": r_info.rk },
+        "refund_presigned_before_funding": { "txid": r_info.txid, "sighash": r_info.sighash, "rk": r_info.rk,
+            "lock_input": format!("{fund_txid}:0"), "lock_address": payer_taddr, "n_lock_time": lock_height, "n_sequence": format!("{:08x}", chain::LOCK_SEQUENCE) },
+        "claim_window": { "settlement_expiry_height": settle_expiry, "refund_first_valid_height": lock_height + 1 },
     });
+
+    // ---- the race attempt: broadcast the refund while the claim window is open.
+    // v2: consensus rejects it as non-final.
+    let refund_raw = {
+        let p = chain::pczt_from_bytes(&rd("refund-signed.pczt")?)?;
+        l.finalize(p, fund_h, &escrow.cmx, r_info.action_index).await?.0
+    };
+    let tip_now = l.latest().await?;
+    ensure!(tip_now < lock_height, "lock already passed; cannot show the early rejection");
+    let early = l.send(refund_raw.clone()).await?;
+    log("refund-early", json!({ "tip": tip_now, "error_code": early.error_code, "message": early.error_message }));
+    ensure!(early.error_code != 0, "SECURITY: refund accepted before its lock height");
+    evidence["refund_before_lock"] = json!({ "tip": tip_now, "accepted": false, "error_code": early.error_code, "message": early.error_message });
 
     if mode == "refund" {
         // merchant "disappears": payer finalizes and broadcasts the refund alone
-        let refund = chain::pczt_from_bytes(&rd("refund-signed.pczt")?)?;
-        let (raw, txid) = l.finalize(refund, fund_h, &escrow_cmx, r_info.action_index).await?;
-        let r = l.send(raw).await?;
+        // wait until the next block is above the lock height
+        loop {
+            let t = l.latest().await?;
+            if t >= lock_height { break; }
+            log("waiting", json!({ "tip": t, "lock_height": lock_height }));
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+        let txid = r_info.txid.clone();
+        let r = l.send(refund_raw).await?;
         ensure!(r.error_code == 0, "refund broadcast rejected: {}", r.error_message);
         let (_, h) = l.wait_mined(&txid, 1800).await?;
         log("refund-mined", json!({ "txid": txid, "height": h }));
-        evidence["refund"] = json!({ "txid": txid, "height": h, "value_returned": chain::max_payout(ESCROW) });
+        ensure!(h > lock_height);
+        evidence["refund"] = json!({ "txid": txid, "height": h, "value_returned": chain::refund_payout(ESCROW), "lock_coin_returned": chain::LOCK_UTXO_VALUE });
     } else {
         // ---- settlement: merchant builds, both check, two-party adaptor signature
         let tip = l.latest().await?;
-        let terms = SpendTerms { kind: "settle".into(), pay_to: merchant_ua.clone(), amount: PRICE, change_to: Some(payer_ua.clone()), target_height: tip + 1, expiry_height: tip + 30 };
+        ensure!(tip + 10 < settle_expiry, "too close to the end of the claim window");
+        let terms = SpendTerms { kind: "settle".into(), pay_to: merchant_ua.clone(), amount: PRICE, change_to: Some(payer_ua.clone()), target_height: tip + 1, expiry_height: settle_expiry, lock: None, t_out: None };
         let pczt_bytes = chain::pczt_to_bytes(chain::build_spend(&joint, &escrow.note, &terms)?)?;
         let info = chain::check_spend(&chain::pczt_from_bytes(&pczt_bytes)?, &joint, &escrow.note, &terms)?; // payer
         let info_m = chain::check_spend(&chain::pczt_from_bytes(&pczt_bytes)?, &joint, &escrow.note, &terms)?; // merchant
