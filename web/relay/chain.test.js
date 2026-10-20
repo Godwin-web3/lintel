@@ -33,7 +33,7 @@ fake.on('stream', (stream, headers) => {
       sent.push(req);
       const bad = req.includes(Buffer.from([0xba, 0xd0]));
       out = [bad ? Buffer.concat([encV(1, 0), enc(2, Buffer.from('transaction is locked until after block height 4522354'))])
-        : Buffer.concat([enc(2, Buffer.from('aa'.repeat(32)))])];
+        : Buffer.concat([enc(2, Buffer.from(req.includes(Buffer.from([0x51])) ? '"' + 'bb'.repeat(32) + '"' : 'aa'.repeat(32)))])];
     }
     stream.respond({ ':status': 200, 'content-type': 'application/grpc' }, { waitForTrailers: true });
     stream.on('wantTrailers', () => stream.sendTrailers({ 'grpc-status': '0' }));
@@ -64,10 +64,12 @@ test('chain proxy: height, tree, ordered block commitments, broadcast', async ()
   assert.equal((await call('POST', '/chain/broadcast', { tx: 'ab'.repeat(30001) })).status, 400);
   const ok = (await call('POST', '/chain/broadcast', { tx: '0600008001' })).json;
   assert.equal(ok.accepted, true);
+  const quoted = (await call('POST', '/chain/broadcast', { tx: '065151' })).json;
+  assert.equal(quoted.accepted, true, 'testnet lightwalletd returns the txid JSON-quoted on success');
   const no = (await call('POST', '/chain/broadcast', { tx: '06bad0' })).json;
   assert.equal(no.accepted, false, 'a node error message means rejected even with error_code 0');
   assert.match(no.error_message, /locked until/);
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 3);
 });
 
 test('chain-mode session: no nonce up front, settlement round gated, no relay signature', async () => {
