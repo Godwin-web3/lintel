@@ -26,6 +26,9 @@ export async function harness({ appPort = 4180 } = {}) {
 }
 
 export async function sell(page, app, { title, text, copies = 1, query = '' }) {
+  // Fresh document each time: a hash-only navigation keeps the previous
+  // listing's result on screen and the form never appears.
+  await page.goto('about:blank');
   await page.goto(`${app}/${query}#/sell`);
   await page.waitForSelector('.engine.ready', { timeout: 300000 });
   await page.fill('input[maxlength="120"]', title);
