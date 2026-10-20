@@ -11,7 +11,7 @@ multicore = ["halo2_proofs/multicore"]
 chain = [
     "dep:orchard", "dep:pczt", "dep:zcash_primitives", "dep:zcash_protocol",
     "dep:zcash_address", "dep:incrementalmerkletree", "dep:anyhow", "dep:rand_core",
-    "dep:zcash_note_encryption",
+    "dep:zcash_note_encryption", "dep:zcash_transparent", "dep:secp256k1", "dep:bs58",
 ]
 # lightwalletd client for the lintel-chain CLI.
 net = ["chain", "dep:tonic", "dep:tonic-prost", "dep:prost", "dep:tokio", "dep:http"]
@@ -38,6 +38,10 @@ incrementalmerkletree = { version = "0.9", optional = true, features = ["legacy-
 rand_core = { version = "0.10", optional = true }
 zcash_note_encryption = { version = "0.5.1", optional = true }
 anyhow = { version = "1", optional = true }
+# Time-locked refund (v2): one payer-owned P2PKH input with a non-final sequence.
+zcash_transparent = { version = "=0.11.0-pre.2", optional = true, features = ["transparent-inputs"] }
+secp256k1 = { version = "0.33", optional = true }
+bs58 = { version = "0.5", optional = true, features = ["check"] }
 tonic = { version = "0.14", optional = true, features = ["transport", "tls-ring", "tls-webpki-roots", "codegen"] }
 tonic-prost = { version = "0.14", optional = true }
 prost = { version = "0.14", optional = true }
