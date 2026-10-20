@@ -7,6 +7,9 @@
 //!
 //! The sighash is the real per-tx shielded sighash from Signer::shielded_sighash().
 //! Never prints spending keys.
+//!
+//! LEGACY single-process tool (both shares come from `lintel-cli create`).
+//! The two-party, escrow-bound path is `lintel-chain` + `lintel::chain`.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -14,7 +17,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, bail};
-use ff013::PrimeField;
+use ff::PrimeField;
 use orchard::primitives::redpallas::{self, SpendAuth};
 use pczt::roles::low_level_signer;
 use pczt::roles::signer::Signer;
