@@ -8,5 +8,6 @@ if ! command -v cargo >/dev/null; then
 fi
 rustup target add wasm32-unknown-unknown
 command -v wasm-pack >/dev/null || curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+mkdir -p public  # public/ only holds generated files, so a fresh clone lacks it
 npm run wasm
 npm run build
