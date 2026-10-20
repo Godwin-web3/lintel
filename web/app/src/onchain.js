@@ -42,10 +42,12 @@ export const chainHeight = async () => (await relay('GET', '/chain/height')).hei
 export async function chainTxMined(txid) {
   try { const r = await relay('GET', `/chain/tx/${txid}`); return r.mined ? r : null; } catch { return null; }
 }
-export async function broadcast(rawHex) {
+/** Broadcasts; if the node says no, still succeeds when it already knows `txid` (retry after a lost reply). */
+export async function broadcast(rawHex, txid) {
   const r = await relay('POST', '/chain/broadcast', { tx: rawHex });
-  if (!r.accepted) throw new Error(`node rejected the transaction: ${r.error_message || 'error ' + r.error_code}`);
-  return r;
+  if (r.accepted) return r;
+  if (txid) { try { await relay('GET', `/chain/tx/${txid}`); return { ...r, accepted: true, already_known: true }; } catch {} }
+  throw new Error(`node rejected the transaction: ${r.error_message || 'error ' + r.error_code}`);
 }
 /** Witness from public data, proof, full verification (all in this browser). */
 async function finalize(pcztBytes, actionIndex, note) {
@@ -187,7 +189,7 @@ export async function advanceBuyer(listing, verifiedT) {
     return { phase: 'refund', note: 'Refund signed and stored on this device' };
   }
   if (!ch.funding_txid) {
-    await broadcast(c.fund.raw);
+    await broadcast(c.fund.raw, c.fund.txid);
     wallet.markSpent(c.src.cmx, c.fund.txid);
     await post('funding_txid', c.fund.txid);
     return { phase: 'funding', note: `Funding broadcast: ${c.fund.txid}` };
@@ -247,7 +249,7 @@ export async function broadcastRefund(lid) {
   const c = store.get().buying[lid].chain;
   if (!c.escrow.height) throw new Error('escrow not mined; nothing to refund (the funding was never confirmed)');
   const r = await finalize(unb64(c.refundSigned), c.refundInfo.action_index, c.escrow);
-  await broadcast(r.raw);
+  await broadcast(r.raw, r.txid);
   putBuy(lid, (x) => { x.refundBroadcast = r.txid; });
   return r.txid;
 }
@@ -335,7 +337,7 @@ export async function advanceSeller(lid, entry, listing, session) {
     const p = await C('chainApplySignature', unb64(c.settlePczt), info.action_index, sig);
     const r = await finalize(p, info.action_index, c.escrow);
     if (r.txid !== info.txid) throw new Error('settlement txid changed');
-    await broadcast(r.raw);
+    await broadcast(r.raw, r.txid);
     putSell(lid, (x) => { x.settleTxid = r.txid; });
     await post('settle_txid', r.txid);
     return `Settlement broadcast: ${r.txid}`;
