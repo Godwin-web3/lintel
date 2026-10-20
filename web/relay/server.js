@@ -10,31 +10,38 @@
 // Writes are write-once and gated by bearer tokens the relay hands out:
 // seller_token (on listing creation) and buyer_token (on session creation).
 // Tokens only stop third parties from overwriting fields; they protect no secret.
+//
+// Two listing kinds:
+// * v1 (no `version`): one adaptor secret, one sale, interactive (seller online
+//   for each step). Routes /listings/:id/sessions and /sessions/:id/*.
+// * v2 (`version: 2`, presale): up to MAX_UNITS copies, each with its own
+//   adaptor secret, key share and pre-committed nonce. A buyer orders a unit and
+//   pre-signs in one request; the seller completes later in one request. The
+//   relay never receives t, s_b in the clear, or anything else that yields t.
+//   Routes /listings/:id/units*, /orders/:id*.
+//
+// Persistence is pluggable (see storage.js): RELAY_STORAGE=file|memory|upstash.
 
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createStorage } from './storage.js';
 
 const PORT = Number(process.env.PORT || 8787);
 const DATA = process.env.DATA_FILE || path.join(process.cwd(), 'data.json');
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '*').split(',').map((s) => s.trim());
 const MAX_BODY = 64 * 1024;
+const MAX_UNITS = Number(process.env.MAX_UNITS || 20);
+const MAX_PAYLOAD_V2 = 7905; // lintel_wasm.maxPayloadV2(): 4 parts x 64 chunks x 31 bytes - 31
 const MAX_LISTINGS = Number(process.env.MAX_LISTINGS || 5000);
 
-const db = load();
-function load() {
-  try { return JSON.parse(fs.readFileSync(DATA, 'utf8')); } catch { return { listings: {}, sessions: {} }; }
-}
-let saveTimer = null;
-function save() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    const tmp = DATA + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(db));
-    fs.renameSync(tmp, DATA);
-  }, 200);
-}
+export const storage = createStorage({ ...process.env, DATA_FILE: DATA });
+const db = await storage.load();
+// save(): something changed; the backend persists only records whose JSON
+// differs from what it last wrote. touch(): the exact records that changed.
+function save() { storage.touchAll(); }
+const touch = (...recs) => { for (const [c, id] of recs) storage.touch(c, id); };
 
 const id = () => crypto.randomBytes(9).toString('base64url');
 const token = () => crypto.randomBytes(24).toString('base64url');
@@ -53,9 +60,46 @@ const jsonStr = (v, max) => { if (typeof v !== 'string' || v.length > max) retur
 class Bad extends Error { constructor(m, code = 400) { super(m); this.code = code; } }
 const need = (cond, msg) => { if (!cond) throw new Bad(msg); };
 
-function publicListing(l) {
+function publicListing(l, { offers = false } = {}) {
   const { seller_token_hash, ...rest } = l;
+  if (l.version === 2) {
+    rest.units = l.units.map((u, index) => {
+      const { offer, ...pub } = u;
+      return offers ? { index, ...u } : { index, ...pub };
+    });
+    Object.assign(rest, unitCounts(l));
+  }
   return rest;
+}
+const unitCounts = (l) => ({
+  units_total: l.units.length,
+  units_open: l.units.filter((u) => u.state === 'open').length,
+  units_sold: l.units.filter((u) => u.state === 'sold').length,
+});
+function v2Status(l) {
+  const c = unitCounts(l);
+  return c.units_open > 0 ? 'open' : c.units_sold === c.units_total ? 'sold' : 'pending';
+}
+function publicOrder(o) {
+  const { buyer_token_hash, ...rest } = o;
+  return rest;
+}
+// A presale unit: everything public about one copy of a v2 listing.
+function checkUnit(u) {
+  need(u && typeof u === 'object' && !Array.isArray(u), 'unit required');
+  need(isHex(u.t_point, 64), 'unit.t_point must be 32-byte hex');
+  need(isHex(u.merchant_vk, 64), 'unit.merchant_vk must be 32-byte hex');
+  need(isHex(u.r_b, 64), 'unit.r_b must be 32-byte hex');
+  need(jsonStr(u.pok, 1024), 'unit.pok must be JSON');
+  need(jsonStr(u.offer, 60 * 1024), 'unit.offer must be JSON (max 60 KB)');
+  return { t_point: u.t_point, merchant_vk: u.merchant_vk, r_b: u.r_b, pok: u.pok, offer: u.offer, state: 'open', order_id: null };
+}
+// Single use is the seller app's job; this catches a buggy client re-sending
+// a unit (same nonce or key) before it can ever be signed twice.
+function assertFreshUnit(l, u) {
+  for (const x of l.units) {
+    need(x.r_b !== u.r_b && x.merchant_vk !== u.merchant_vk && x.t_point !== u.t_point, 'unit reuses a nonce, key or adaptor point');
+  }
 }
 function publicSession(s) {
   const { buyer_token_hash, ...rest } = s;
@@ -69,11 +113,16 @@ const routes = [
   ['GET', /^\/listings$/, () => ({
     listings: Object.values(db.listings)
       .sort((a, b) => b.created_at - a.created_at)
-      .map(({ offer, ...l }) => publicListing(l)), // list view omits the bulky offer
+      .map(({ offer, units, ...l }) => {
+        if (l.version !== 2) return publicListing(l); // list view omits the bulky offer
+        const { seller_token_hash, ...rest } = l;
+        return { ...rest, ...unitCounts({ units }) };
+      }),
   })],
 
   ['POST', /^\/listings$/, (_, body) => {
     need(Object.keys(db.listings).length < MAX_LISTINGS, 'relay is full');
+    if (body.version === 2) return createV2(body);
     need(str(body.title, 120), 'title required (max 120 chars)');
     need(body.description === undefined || (typeof body.description === 'string' && body.description.length <= 2000), 'description too long');
     need(typeof body.price_zec === 'string' && /^\d{1,8}(\.\d{1,8})?$/.test(body.price_zec) && Number(body.price_zec) > 0, 'price_zec must be a positive decimal');
@@ -97,6 +146,7 @@ const routes = [
 
   ['GET', /^\/listings\/([\w-]+)$/, ([lid]) => {
     const l = db.listings[lid]; if (!l) throw new Bad('not found', 404);
+    if (l.version === 2) return { listing: publicListing(l), session: null };
     return { listing: publicListing(l), session: l.session_id ? publicSession(db.sessions[l.session_id]) : null };
   }],
 
@@ -104,6 +154,7 @@ const routes = [
   // completed signature, so a second sale would hand the goods out for free.
   ['POST', /^\/listings\/([\w-]+)\/sessions$/, ([lid], body) => {
     const l = db.listings[lid]; if (!l) throw new Bad('not found', 404);
+    need(l.version !== 2, 'presale listings use /units/:i/orders');
     if (l.session_id) {
       const s = db.sessions[l.session_id];
       const stale = !s.presig && Date.now() - s.created_at > 15 * 60 * 1000;
@@ -157,7 +208,106 @@ const routes = [
     s.signature = body.signature; l.status = 'sold'; save();
     return { session: publicSession(s) };
   }],
+
+  // ---------- v2: presale listings ----------
+
+  // Seller adds another pre-sealed copy (its own t, key share, nonce, proof).
+  ['POST', /^\/listings\/([\w-]+)\/units$/, ([lid], body, auth) => {
+    const l = v2(lid);
+    if (!tokOk(auth, l.seller_token_hash)) throw new Bad('seller token required', 401);
+    need(l.units.length < MAX_UNITS, `at most ${MAX_UNITS} copies per listing`);
+    const u = checkUnit(body.unit); assertFreshUnit(l, u);
+    l.units.push(u); l.status = v2Status(l); touch(['listings', lid]);
+    return { listing: publicListing(l) };
+  }],
+
+  ['GET', /^\/listings\/([\w-]+)\/units\/(\d+)$/, ([lid, i]) => {
+    const l = v2(lid); const u = l.units[Number(i)]; if (!u) throw new Bad('not found', 404);
+    return { unit: { index: Number(i), ...u } };
+  }],
+
+  ['GET', /^\/listings\/([\w-]+)\/orders$/, ([lid]) => {
+    const l = v2(lid);
+    return { orders: l.units.filter((u) => u.order_id && db.orders[u.order_id]).map((u) => publicOrder(db.orders[u.order_id])) };
+  }],
+
+  // Buyer orders one open copy and pre-signs in the same request.
+  ['POST', /^\/listings\/([\w-]+)\/units\/(\d+)\/orders$/, ([lid, i], body) => {
+    const l = v2(lid); const idx = Number(i); const u = l.units[idx]; if (!u) throw new Bad('not found', 404);
+    if (u.state !== 'open') throw new Bad('this copy is taken; pick another', 409);
+    for (const k of ['payer_vk', 'r_a', 'dh_point', 's_a', 'alpha']) need(isHex(body[k], 64), `${k} must be 32-byte hex`);
+    need(isHex(body.sighash) && body.sighash.length <= 128, 'sighash must be hex (max 64 bytes)');
+    need(jsonStr(body.payer_pok, 1024), 'payer_pok must be JSON');
+    const tok = token();
+    const o = {
+      id: id(), listing_id: lid, unit: idx, created_at: Date.now(), status: 'awaiting_seller',
+      payer_vk: body.payer_vk, r_a: body.r_a, dh_point: body.dh_point, s_a: body.s_a, payer_pok: body.payer_pok,
+      alpha: body.alpha, sighash: body.sighash, signature: null, enc_sb: null, reason: null,
+      buyer_token_hash: hashTok(tok),
+    };
+    db.orders[o.id] = o; u.state = 'ordered'; u.order_id = o.id; l.status = v2Status(l);
+    touch(['orders', o.id], ['listings', lid]);
+    return { order: publicOrder(o), buyer_token: tok };
+  }],
+
+  ['GET', /^\/orders\/([\w-]+)$/, ([oid]) => {
+    const o = db.orders[oid]; if (!o) throw new Bad('not found', 404);
+    return { order: publicOrder(o) };
+  }],
+
+  // Seller's single step: the full signature plus s_b masked to the buyer.
+  ['POST', /^\/orders\/([\w-]+)\/complete$/, ([oid], body, auth) => {
+    const [o, l, u] = orderCtx(oid, auth);
+    need(o.status === 'awaiting_seller', 'order is not awaiting the seller');
+    need(isHex(body.signature, 128), 'signature must be 64-byte hex');
+    need(isHex(body.enc_sb, 64), 'enc_sb must be 32-byte hex');
+    o.signature = body.signature; o.enc_sb = body.enc_sb; o.status = 'complete'; o.completed_at = Date.now();
+    u.state = 'sold'; l.status = v2Status(l);
+    touch(['orders', oid], ['listings', l.id]);
+    return { order: publicOrder(o) };
+  }],
+
+  // Seller refuses an invalid order before signing anything; the copy reopens.
+  ['POST', /^\/orders\/([\w-]+)\/reject$/, ([oid], body, auth) => {
+    const [o, l, u] = orderCtx(oid, auth);
+    need(o.status === 'awaiting_seller', 'order is not awaiting the seller');
+    need(body.reason === undefined || (typeof body.reason === 'string' && body.reason.length <= 200), 'reason too long');
+    o.status = 'rejected'; o.reason = body.reason || 'rejected by seller';
+    u.state = 'open'; u.order_id = null; l.status = v2Status(l);
+    touch(['orders', oid], ['listings', l.id]);
+    return { order: publicOrder(o) };
+  }],
 ];
+
+function v2(lid) {
+  const l = db.listings[lid]; if (!l) throw new Bad('not found', 404);
+  need(l.version === 2, 'not a presale listing');
+  return l;
+}
+function orderCtx(oid, auth) {
+  const o = db.orders[oid]; if (!o) throw new Bad('not found', 404);
+  const l = db.listings[o.listing_id];
+  if (!l || !tokOk(auth, l.seller_token_hash)) throw new Bad('seller token required', 401);
+  return [o, l, l.units[o.unit]];
+}
+function createV2(body) {
+  need(str(body.title, 120), 'title required (max 120 chars)');
+  need(body.description === undefined || (typeof body.description === 'string' && body.description.length <= 2000), 'description too long');
+  need(typeof body.price_zec === 'string' && /^\d{1,8}(\.\d{1,8})?$/.test(body.price_zec) && Number(body.price_zec) > 0, 'price_zec must be a positive decimal');
+  need(isHex(body.content_hash, 64), 'content_hash must be 32-byte hex');
+  need(body.filename === undefined || str(body.filename, 120), 'filename too long');
+  need(Number.isInteger(body.size) && body.size >= 0 && body.size <= MAX_PAYLOAD_V2, 'size invalid');
+  const unit = checkUnit(body.unit);
+  const tok = token();
+  const l = {
+    id: id(), version: 2, created_at: Date.now(), status: 'open',
+    title: body.title, description: body.description || '', price_zec: body.price_zec,
+    content_hash: body.content_hash, filename: body.filename || null, size: body.size,
+    units: [unit], seller_token_hash: hashTok(tok),
+  };
+  db.listings[l.id] = l; touch(['listings', l.id]);
+  return { listing: publicListing(l), seller_token: tok };
+}
 
 function cors(req, res) {
   const origin = req.headers.origin;
@@ -166,6 +316,9 @@ function cors(req, res) {
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  // The app is cross-origin isolated (COOP/COEP) for threaded proving; CORS
+  // already makes these responses loadable, CORP states it explicitly.
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 }
 
 function send(res, code, obj) {
@@ -200,5 +353,11 @@ export const server = http.createServer((req, res) => {
 });
 
 if (process.env.NODE_ENV !== 'test') {
-  server.listen(PORT, () => console.log(`lintel relay on :${PORT}`));
+  server.listen(PORT, () => console.log(`lintel relay on :${PORT} (storage: ${storage.kind})`));
+  const stop = async () => {
+    try { await storage.flush(); } catch (e) { console.error(`relay storage flush failed: ${e.message}`); }
+    process.exit(0);
+  };
+  process.on('SIGTERM', stop);
+  process.on('SIGINT', stop);
 }
