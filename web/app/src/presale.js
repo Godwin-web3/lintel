@@ -9,7 +9,8 @@
 // stored completion; a unit marked used for one order never signs another.
 //
 // Buyer device storage: buying2[orderId] = { listingId, unit, token, keep, order, title }
-// `keep` is the buyer's ephemeral DH secret; the signing share and nonce are
+// `keep` is the buyer's ephemeral DH secret plus a digest of the exact unit it
+// verified (unlock refuses a re-served unit that differs); the signing share and nonce are
 // dropped inside the worker right after pre-signing.
 
 import { crypto, relay, store, randomHex, randomAlpha, sleep } from './api.js';
