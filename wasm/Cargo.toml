@@ -10,6 +10,8 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # Multithreaded browser proving. Build with nightly + atomics (see web/app/build.sh).
 threads = ["lintel/multicore", "dep:wasm-bindgen-rayon"]
+# In-browser on-chain settlement (PCZT build/check/prove, Ironwood, v6, NU7 testnet).
+chain = ["lintel/chain", "dep:orchard", "dep:zcash_primitives", "dep:anyhow", "dep:rand"]
 
 [dependencies]
 lintel = { path = "../engine", default-features = false }
@@ -22,6 +24,14 @@ group = "0.14"
 pasta_curves = "0.6"
 blake2b_simd = "1.0"
 wasm-bindgen-rayon = { version = "1.3", optional = true }
+# chain feature: same versions as the engine's `chain` feature
+orchard = { version = "0.16", optional = true, default-features = false, features = ["circuit", "std"] }
+zcash_primitives = { version = "=0.31.0-pre.2", optional = true, default-features = false, features = ["std", "circuits"] }
+anyhow = { version = "1", optional = true }
+rand = { version = "0.10", optional = true }
+
+[dev-dependencies]
+incrementalmerkletree = { version = "0.9", features = ["legacy-api"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
