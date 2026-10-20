@@ -370,6 +370,7 @@ dependencies = [
 name = "lintel-wasm"
 version = "0.1.0"
 dependencies = [
+ "blake2b_simd",
  "console_error_panic_hook",
  "ff",
  "getrandom 0.2.17",
