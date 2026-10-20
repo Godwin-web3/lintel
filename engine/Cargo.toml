@@ -7,7 +7,15 @@ autobins = false
 [features]
 default = ["multicore"]
 multicore = ["halo2_proofs/multicore"]
-inject = ["dep:orchard", "dep:pczt", "dep:anyhow", "dep:ff013"]
+# On-chain settlement (NU6.3+/NU7 testnet, Ironwood pool, V6 PCZTs).
+chain = [
+    "dep:orchard", "dep:pczt", "dep:zcash_primitives", "dep:zcash_protocol",
+    "dep:zcash_address", "dep:incrementalmerkletree", "dep:anyhow", "dep:rand_core",
+    "dep:zcash_note_encryption",
+]
+# lightwalletd client for the lintel-chain CLI.
+net = ["chain", "dep:tonic", "dep:tonic-prost", "dep:prost", "dep:tokio", "dep:http"]
+inject = ["chain"]
 
 [dependencies]
 blake2b_simd = "1.0"
@@ -20,11 +28,21 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 halo2_proofs = { version = "0.4", default-features = false, features = ["batch"] }
 halo2_gadgets = "0.6"
-orchard = { version = "0.15", optional = true }
-pczt = { version = "0.9", optional = true, features = ["signer"] }
+# Same pasta 0.6 / ff 0.14 stack as the engine, so scalars and points are shared types.
+orchard = { version = "0.16", optional = true, features = ["circuit"] }
+pczt = { version = "=0.10.0-pre.2", optional = true, features = ["orchard", "signer", "prover", "io-finalizer", "tx-extractor", "zcp-builder", "spend-finalizer"] }
+zcash_primitives = { version = "=0.31.0-pre.2", optional = true, default-features = false, features = ["std", "circuits"] }
+zcash_protocol = { version = "=0.11.0-pre.1", optional = true }
+zcash_address = { version = "=0.14.0-pre.2", optional = true }
+incrementalmerkletree = { version = "0.9", optional = true, features = ["legacy-api"] }
+rand_core = { version = "0.10", optional = true }
+zcash_note_encryption = { version = "0.5.1", optional = true }
 anyhow = { version = "1", optional = true }
-# orchard/pczt still expose pasta 0.5 scalars (ff 0.13)
-ff013 = { package = "ff", version = "0.13", optional = true }
+tonic = { version = "0.14", optional = true, features = ["transport", "tls-ring", "tls-webpki-roots", "codegen"] }
+tonic-prost = { version = "0.14", optional = true }
+prost = { version = "0.14", optional = true }
+tokio = { version = "1", optional = true, features = ["rt-multi-thread", "macros", "time"] }
+http = { version = "1", optional = true }
 
 [lib]
 name = "lintel"
@@ -38,3 +56,12 @@ path = "src/bin/lintel-cli.rs"
 name = "lintel-inject"
 path = "src/bin/lintel-inject.rs"
 required-features = ["inject"]
+
+[[bin]]
+name = "lintel-chain"
+path = "src/bin/lintel-chain.rs"
+required-features = ["net"]
+
+[[example]]
+name = "testnet_sale"
+required-features = ["net"]
