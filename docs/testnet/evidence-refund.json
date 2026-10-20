@@ -1,0 +1,23 @@
+{
+  "branch": "77190ad9",
+  "escrow_address": "utest1gf4awmts6mmwun6qmjyx7vs7pgk2je3rsktcl28sc9syhfpwhvjzf343jfpq62d9y3frpwyhawdexm2ynuavlgxqra65nqgkmglktyx5",
+  "funding": {
+    "escrow_value": 3000000,
+    "height": 4521282,
+    "txid": "f11c111d89e870b69ade0478f7331f0e8131bac7c596846a8327832a16a235e4"
+  },
+  "joint_ak": "205fcfbb97c96c43587da6cb5d14e4925bfed79d489a07854c9adbdbdfdd5b22",
+  "network": "testnet",
+  "pool": "Ironwood",
+  "refund_presigned_before_funding": {
+    "rk": "fe5950b3f387b3cef80294a70f51bdc29954669b348f1904686aed339c1c820b",
+    "sighash": "033f6aee4a040da387b73b9ba411926b1fc66cf287310d1d965b30a519c63a63",
+    "txid": "633ac619a5305b961d0d3187f26cc61f6b9211a49b3bb787a30d044aee6a3f03"
+  },
+  "refund": {
+    "height": 4521289,
+    "txid": "633ac619a5305b961d0d3187f26cc61f6b9211a49b3bb787a30d044aee6a3f03",
+    "value_returned": 2990000
+  },
+  "tx_version": "v6"
+}
