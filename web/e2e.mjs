@@ -11,7 +11,11 @@ const relayProc = spawn(process.execPath, [here('./relay/server.js').pathname], 
   env: { ...process.env, PORT: String(port), DATA_FILE: `/tmp/lintel-e2e-${port}.json` }, stdio: 'inherit',
 });
 const base = `http://127.0.0.1:${port}`;
+// Proving is synchronous WASM and blocks the event loop for tens of seconds,
+// during which the relay closes the idle keep-alive socket. Yield first so
+// fetch sees that close instead of writing to a dead socket ("other side closed").
 const call = async (method, path, body, tok) => {
+  await new Promise((r) => setTimeout(r, 20));
   const r = await fetch(base + path, { method, headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: `Bearer ${tok}` } : {}) }, body: body && JSON.stringify(body) });
   const j = await r.json(); if (!r.ok) throw new Error(`${path}: ${j.error}`); return j;
 };
@@ -68,6 +72,81 @@ try {
   const leaked = relayDump.includes(Buffer.from(payload).toString('hex')) || relayDump.includes('reentrancy') || relayDump.includes(JSON.parse(m0.exportState()).secret);
   console.log(JSON.stringify({ decrypted_ok: ok, status: sold, relay_saw_plaintext_or_secret: leaked }));
   if (!ok || sold !== 'sold' || leaked) process.exitCode = 1;
+
+  // ---------- v2 presale: 2 copies, seller offline while both buyers order ----------
+  L.warmUpV2WithParams(fs.readFileSync(here('./app/public/params.bin')));
+  const big = enc.encode('Full write-up: '.padEnd(3000, 'x') + ' END'); // > 1,953 bytes: 2 proof parts
+  const h2 = L.contentHashV2(big);
+  const secrets = {};
+  const t0 = Date.now();
+  const s1 = JSON.parse(L.sealUnit(big)); secrets[s1.unit.r_b] = s1.secret;
+  const sealMs = Date.now() - t0;
+  const c2 = await call('POST', '/listings', { version: 2, title: 'Big report', price_zec: '2', content_hash: h2, size: big.length, unit: s1.unit });
+  const s2 = JSON.parse(L.sealUnit(big)); secrets[s2.unit.r_b] = s2.secret;
+  await call('POST', `/listings/${c2.listing.id}/units`, { unit: s2.unit }, c2.seller_token);
+  const lid2 = c2.listing.id; const st2 = c2.seller_token;
+  // (seller goes offline here)
+
+  const buyers = [];
+  for (const idx of [0, 1]) {
+    const { unit } = await call('GET', `/listings/${lid2}/units/${idx}`);
+    const unitJson = JSON.stringify(unit);
+    let refused = false;
+    try { L.buyerOrder(unitJson, '00'.repeat(32), alpha, Buffer.from(sighash, 'hex')); } catch { refused = true; }
+    if (!refused) throw new Error('buyer pre-signed against a wrong content hash');
+    const { order, keep } = JSON.parse(L.buyerOrder(unitJson, h2, alpha, Buffer.from(rnd(32), 'hex')));
+    const r = await call('POST', `/listings/${lid2}/units/${idx}/orders`, order);
+    buyers.push({ idx, unitJson, order, keep, id: r.order.id });
+  }
+
+  // Seller comes back once and completes both orders in one pass.
+  const { listing: l2 } = await call('GET', `/listings/${lid2}`);
+  const { orders } = await call('GET', `/listings/${lid2}/orders`);
+  for (const o of orders) {
+    const unitJson = JSON.stringify(l2.units[o.unit]);
+    const ow = { payer_vk: o.payer_vk, r_a: o.r_a, dh_point: o.dh_point, s_a: o.s_a, payer_pok: o.payer_pok, alpha: o.alpha, sighash: o.sighash };
+    if (!L.checkOrder(unitJson, JSON.stringify(ow))) throw new Error('order invalid');
+    const done = JSON.parse(L.sellerComplete(secrets[l2.units[o.unit].r_b], JSON.stringify(ow)));
+    await call('POST', `/orders/${o.id}/complete`, done, st2);
+  }
+
+  // Each buyer unlocks its own copy.
+  const outs = [];
+  for (const b of buyers) {
+    const { order } = await call('GET', `/orders/${b.id}`);
+    outs.push(Buffer.from(L.buyerUnlock(b.keep, b.unitJson, JSON.stringify(b.order), JSON.stringify({ signature: order.signature, enc_sb: order.enc_sb }))).equals(Buffer.from(big)));
+  }
+  // A buyer cannot unlock the other buyer's copy with its own key.
+  let cross = false;
+  try {
+    const { order } = await call('GET', `/orders/${buyers[1].id}`);
+    L.buyerUnlock(buyers[0].keep, buyers[1].unitJson, JSON.stringify(buyers[1].order), JSON.stringify({ signature: order.signature, enc_sb: order.enc_sb }));
+    cross = true;
+  } catch {}
+  // A relay that re-serves the copy with another offer (same keys) cannot redirect the unlock.
+  let swapped = false;
+  try {
+    const { order } = await call('GET', `/orders/${buyers[0].id}`);
+    const u = JSON.parse(buyers[0].unitJson); u.offer = JSON.parse(buyers[1].unitJson).offer;
+    L.buyerUnlock(buyers[0].keep, JSON.stringify(u), JSON.stringify(buyers[0].order), JSON.stringify({ signature: order.signature, enc_sb: order.enc_sb }));
+    swapped = true;
+  } catch {}
+  // The buyer's own DH secret with the other buyer's (honest) copy does not unmask its share.
+  let crossKey = false;
+  try {
+    const { order } = await call('GET', `/orders/${buyers[1].id}`);
+    const k = JSON.parse(buyers[1].keep); k.e = JSON.parse(buyers[0].keep).e;
+    L.buyerUnlock(JSON.stringify(k), buyers[1].unitJson, JSON.stringify(buyers[1].order), JSON.stringify({ signature: order.signature, enc_sb: order.enc_sb }));
+    crossKey = true;
+  } catch {}
+  await new Promise((r) => setTimeout(r, 400)); // let the relay flush its file
+  const dump2 = fs.readFileSync(`/tmp/lintel-e2e-${port}.json`, 'utf8');
+  const leaked2 = Object.values(secrets).some((sj) => Object.values(JSON.parse(sj)).some((v) => dump2.includes(v)))
+    || dump2.includes('Full write-up') || buyers.some((b) => dump2.includes(JSON.parse(b.keep).e));
+  const status2 = (await call('GET', `/listings/${lid2}`)).listing.status;
+  const v2 = { v2_both_buyers_decrypted: outs.every(Boolean), v2_status: status2, v2_cross_unlock: cross || crossKey, v2_swapped_offer_unlocked: swapped, v2_relay_saw_secret: leaked2, v2_parts: JSON.parse(s1.unit.offer).parts.length, v2_seal_ms_single_thread_node: sealMs };
+  console.log(JSON.stringify(v2));
+  if (!v2.v2_both_buyers_decrypted || status2 !== 'sold' || cross || crossKey || swapped || leaked2 || v2.v2_parts !== 2) process.exitCode = 1;
 } finally {
   relayProc.kill();
 }

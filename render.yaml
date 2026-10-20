@@ -11,8 +11,16 @@ services:
     envVars:
       - key: ALLOWED_ORIGINS
         value: https://your-app.vercel.app
-    # Free instances have an ephemeral filesystem: listings reset on redeploy.
-    # On a paid plan, uncomment to persist them:
+      # Persistent storage on the free plan: create a free Upstash Redis
+      # database (https://console.upstash.com) and paste its REST URL and
+      # token in the Render dashboard. With both set the relay uses Upstash
+      # automatically; without them it falls back to the ephemeral file.
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+    # Free instances have an ephemeral filesystem: without Upstash, listings
+    # reset on redeploy. On a paid plan you can instead uncomment a disk:
     # disk:
     #   name: lintel-data
     #   mountPath: /var/data

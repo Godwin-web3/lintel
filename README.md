@@ -25,6 +25,8 @@ The party holding `t` (it completes the signature and gets paid) encrypts a payl
 Public inputs: `[T.x, T.y, h, c_0..c_{N-1}]`. The payer runs `verify_offer` against the `T` from the session, then pre-signs. When the signature lands, it runs `extract_t` and `open` to decrypt.
 
 - Payload: up to 1,953 bytes per proof (64 chunks of 31 bytes, chunk 0 = length).
+- Larger payloads (`sealed_multi.rs`): up to 4 proofs bound to the same `t`, with a public keystream offset per part, 7,905 bytes, same pinned parameters.
+- Multi-copy, seller-offline sales (`presale.rs`): a fresh `t`, key share and pre-committed nonce per copy; see [docs/relay-perf.md](docs/relay-perf.md).
 - Proof: about 4.3 KB. Proving takes about 3.3 s on a laptop-class CPU, with no trusted setup (IPA).
 - `t` is sampled below the Pallas base modulus (`sealed::new_secret`) so it works both as a scalar and as a field element.
 - Limit: this proves the content matches `h`. The payer still has to know which `h` it wants, e.g. a hash published or attested out of band.

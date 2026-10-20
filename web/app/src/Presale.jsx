@@ -1,0 +1,186 @@
+// UI for presale (v2) listings: buyer page, purchases, and the seller's
+// listing card. Protocol logic lives in presale.js.
+import { useEffect, useRef, useState } from 'react';
+import { relay, store } from './api.js';
+import { orderV2, awaitUnlock, purchases, verifyListing, addCopies, MAX_COPIES } from './presale.js';
+
+const short = (h) => (h ? `${h.slice(0, 10)}…${h.slice(-6)}` : '');
+const fmtBytes = (n) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`);
+
+export function copiesLabel(l) {
+  if (l.units_total === undefined) return null;
+  return l.units_open > 0 ? `${l.units_open} of ${l.units_total} left` : l.units_sold === l.units_total ? 'sold out' : 'all copies reserved';
+}
+
+const ORDER_TEXT = {
+  awaiting_seller: 'Paid side done. Waiting for the seller’s device to come online and complete (you can close this tab).',
+  complete: 'Seller completed the signature.',
+  rejected: 'Seller rejected the order.',
+};
+
+export function ListingV2({ data, boot, Steps, Notice, reload }) {
+  const L = data.listing;
+  const isMine = !!store.get().selling[L.id];
+  const [verify, setVerify] = useState({ state: 'idle' });
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [mine, setMine] = useState(() => purchases(L.id));
+  const [status, setStatus] = useState({});
+  const [results, setResults] = useState({});
+  const watching = useRef(new Set());
+
+  useEffect(() => {
+    if (boot.state !== 'ready' || verify.state !== 'idle') return;
+    setVerify({ state: 'run' });
+    verifyListing(L).then((r) => setVerify({ state: 'ok', ...r })).catch((e) => setVerify({ state: 'bad', error: e.message }));
+  }, [boot.state, verify.state, L]);
+
+  // Resume every purchase of this listing stored on this device.
+  useEffect(() => {
+    if (boot.state !== 'ready') return;
+    const ctl = new AbortController();
+    for (const p of mine) {
+      if (watching.current.has(p.id)) continue;
+      watching.current.add(p.id);
+      awaitUnlock(p, { signal: ctl.signal, onStatus: (s) => setStatus((x) => ({ ...x, [p.id]: s })) })
+        .then((bytes) => {
+          const text = (() => { try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return null; } })();
+          setResults((x) => ({ ...x, [p.id]: { bytes, text, name: p.filename || `${p.title.replace(/[^\w-]+/g, '_')}.txt` } }));
+          reload();
+        })
+        .catch((e) => { if (e.message !== 'stopped') setStatus((x) => ({ ...x, [p.id]: `error: ${e.message}` })); })
+        .finally(() => watching.current.delete(p.id));
+    }
+    return () => ctl.abort();
+  }, [boot.state, mine]);
+
+  async function buy() {
+    setErr(''); setBusy(true);
+    try {
+      await orderV2(L);
+      setMine(purchases(L.id));
+      reload();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
+
+  const download = (r) => {
+    const url = URL.createObjectURL(new Blob([r.bytes]));
+    const a = Object.assign(document.createElement('a'), { href: url, download: r.name });
+    a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const canBuy = verify.state === 'ok' && L.units_open > 0 && !isMine && !busy;
+  return (
+    <section className="narrow">
+      <a href="#/" className="small">← Market</a>
+      <div className="row"><h1>{L.title}</h1><span className="price big">{L.price_zec} ZEC</span></div>
+      {L.description && <p>{L.description}</p>}
+      <dl className="facts">
+        <dt>Sealed size</dt><dd>{fmtBytes(L.size)}{L.filename ? ` · ${L.filename}` : ''}</dd>
+        <dt>Content hash</dt><dd className="mono">{short(L.content_hash)}</dd>
+        <dt>Copies</dt><dd>{copiesLabel(L)} · each copy has its own unlock key</dd>
+        <dt>Status</dt><dd><span className={`tag ${L.status}`}>{L.status}</span></dd>
+      </dl>
+      <div className={`proof ${verify.state}`}>
+        {verify.state === 'idle' && 'Waiting for prover…'}
+        {verify.state === 'run' && 'Verifying Halo 2 proof on this device…'}
+        {verify.state === 'ok' && <>✓ Proof verified in {verify.ms} ms ({verify.parts} part{verify.parts > 1 ? 's' : ''}): the copy decrypts, under its own unlock secret, to content with this exact hash. The copy you order is verified again before you pre-sign.</>}
+        {verify.state === 'bad' && <>✗ Proof rejected: {verify.error}. Do not buy.</>}
+      </div>
+      <Notice />
+      {isMine && <p className="muted">This is your listing. Sales complete automatically whenever this app is open on this device.</p>}
+      {canBuy && <button className="btn" onClick={buy}>Buy a copy for {L.price_zec} ZEC</button>}
+      {busy && <p className="muted small">Verifying the copy and pre-signing…</p>}
+      {!isMine && L.units_open === 0 && mine.length === 0 && <p className="muted">No copies left right now.</p>}
+      {err && <p className="error">{err}</p>}
+      {mine.map((p) => (
+        <div key={p.id} className="card">
+          <b>Your copy #{p.unit + 1}</b>
+          <Steps steps={[
+            ['Verify proof, pre-sign, send order', 'done', 'The seller did not need to be online'],
+            ['Seller completes the signature', status[p.id] === 'complete' || results[p.id] ? 'done' : String(status[p.id] || '').startsWith('error') || status[p.id] === 'rejected' ? 'fail' : 'run', ORDER_TEXT[status[p.id]] || status[p.id]],
+            ['Extract this copy’s secret and decrypt', results[p.id] ? 'done' : 'wait'],
+          ]} />
+          {results[p.id] && (
+            <div className="unlocked">
+              {results[p.id].text !== null ? <pre>{results[p.id].text}</pre> : <p className="muted">Binary file, {fmtBytes(results[p.id].bytes.length)}.</p>}
+              <button className="btn" onClick={() => download(results[p.id])}>Download</button>
+            </div>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+const ORDER_SELLER = { awaiting_seller: 'waiting for your device', complete: 'sold', rejected: 'rejected' };
+
+/** Seller card for a v2 listing on "My sales". `agent` is the latest background pass. */
+export function SellerCardV2({ id, entry, agent, onForget, boot }) {
+  const l = agent?.listing;
+  const orders = agent?.orders || [];
+  const [adding, setAdding] = useState(null);
+  const [form, setForm] = useState({ copies: 1, text: '', file: null });
+
+  async function add(e) {
+    e.preventDefault();
+    setAdding({ note: 'Sealing…' });
+    try {
+      const payload = form.file ? new Uint8Array(await form.file.arrayBuffer()) : new TextEncoder().encode(form.text);
+      await addCopies({ listingId: id, payload, copies: Number(form.copies), onStep: (i, n, ms) => setAdding({ note: `Sealed copy ${i}/${n} in ${(ms / 1000).toFixed(1)}s` }) });
+      setAdding({ note: 'Added.', done: true });
+    } catch (e2) { setAdding({ error: e2.message }); }
+  }
+
+  return (
+    <div className="card">
+      <div className="row"><b>{entry.title}</b>{l && <span className="price">{l.price_zec} ZEC</span>}</div>
+      <p>{l ? copiesLabel(l) : 'Checking…'}{agent?.completed ? ` · completed ${agent.completed} just now` : ''}</p>
+      {orders.length > 0 && (
+        <ul className="small muted">
+          {orders.map((o) => <li key={o.id}>Copy #{o.unit + 1}: {ORDER_SELLER[o.status] || o.status}</li>)}
+        </ul>
+      )}
+      {agent?.errors?.map((e, i) => <p key={i} className="small error">{e}</p>)}
+      {adding && !adding.done && !adding.error && adding.note && <p className="small muted">{adding.note}</p>}
+      {adding?.error && <p className="small error">{adding.error}</p>}
+      {adding?.form && (
+        <form onSubmit={add} className="form small">
+          <label>Copies to add<input type="number" min={1} max={MAX_COPIES} value={form.copies} onChange={(e) => setForm({ ...form, copies: e.target.value })} /></label>
+          <label>Same content again (it is checked against the listing hash, never stored)
+            <textarea className="mono" rows={3} disabled={!!form.file} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
+          </label>
+          <label className="file">Or the same file<input type="file" onChange={(e) => setForm({ ...form, file: e.target.files[0] || null })} /></label>
+          <button className="btn" disabled={boot.state !== 'ready'}>Seal and add</button>
+        </form>
+      )}
+      <div className="row small">
+        <a href={`#/listing/${id}`}>View listing</a>
+        <button className="link" onClick={() => setAdding({ form: true })}>Add copies</button>
+        <button className="link danger" onClick={() => onForget(id)}>Forget keys</button>
+      </div>
+    </div>
+  );
+}
+
+/** Buyer's purchases across listings (resumable after reload). */
+export function Purchases() {
+  const list = purchases();
+  if (!list.length) return null;
+  return (
+    <>
+      <h2>My purchases</h2>
+      <div className="grid">
+        {list.map((p) => (
+          <a key={p.id} className="card" href={`#/listing/${p.listingId}`}>
+            <b>{p.title}</b>
+            <p className="small muted">Copy #{p.unit + 1} · {p.unlocked ? 'unlocked' : 'waiting for seller'}</p>
+          </a>
+        ))}
+      </div>
+    </>
+  );
+}
+
+export async function fetchListing(id) { return relay('GET', `/listings/${id}`); }
