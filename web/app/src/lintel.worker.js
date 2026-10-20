@@ -144,6 +144,32 @@ const ops = {
   unlockFromTx({ key, rawTx, presig, partial, offer }) {
     return payer(key).unlockFromTx(hex2u8(rawTx), presig, partial, offer);
   },
+  // ---- in-browser on-chain settlement (pkg-chain, loaded on first use) ----
+  // Pure functions over public data plus this device's own wallet keys; see
+  // wasm/src/chain.rs. `fn` must be one of the chain* exports.
+  async chain({ fn, args }) {
+    const C = await chainEngine();
+    if (!/^chain[A-Z]\w*$/.test(fn) || typeof C[fn] !== 'function') throw new Error(`unknown chain function ${fn}`);
+    return C[fn](...(args || []));
+  },
+  async chainAvailable() { try { await chainEngine(); return true; } catch (e) { return String(e?.message || e); } },
+  // Payer state must survive reloads during an on-chain sale (several blocks).
+  // SECRET: returned only to this device's own storage.
+  payerExport({ key }) { return payer(key).exportState(); },
+  payerImport({ key, state }) { if (!payers.has(key)) payers.set(key, L.Payer.fromState(state)); return payer(key).verificationKey(); },
+  payerFresh({ key, avoidYOdd, peerVk }) {
+    // Presale on-chain: the unit's key share is fixed, so the buyer redraws
+    // its own share until vk_a + vk_i has y~ = 0 (no negation needed later).
+    for (let i = 0; i < 64; i++) {
+      const p = new L.Payer();
+      if (!avoidYOdd) { payers.set(key, p); return p.verificationKey(); }
+      const j = JSON.parse(p.bindJoint(peerVk));
+      if (!j.negated) { payers.set(key, p); return p.verificationKey(); }
+      p.free();
+    }
+    throw new Error('could not find a share with an even joint key');
+  },
+  merchantExport({ key }) { return merchant(key).exportState(); },
   rebindPayer({ from, to }) {
     payers.set(to, payer(from));
     payers.delete(from);
@@ -152,6 +178,17 @@ const ops = {
 };
 
 Object.assign(ops, v2ops(() => L, () => ready));
+
+let chainLoad = null;
+function chainEngine() {
+  chainLoad ??= (async () => {
+    const C = await import('./pkg-chain/lintel_chain.js');
+    await C.default();
+    if (typeof C.chainJoint !== 'function') throw new Error('this build has no on-chain engine');
+    return C;
+  })();
+  return chainLoad.catch((e) => { chainLoad = null; throw e; });
+}
 
 function hex2u8(h) {
   const out = new Uint8Array(h.length / 2);
