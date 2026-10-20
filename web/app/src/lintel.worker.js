@@ -1,19 +1,55 @@
 // All cryptography runs here, off the main thread. Signing shares, the
 // adaptor secret t, nonces and plaintext live only in this worker's memory
 // (and, for a seller, in this device's localStorage via exportState).
-import init, * as L from './pkg/lintel_wasm.js';
+//
+// Engine selection: when the page is cross-origin isolated (COOP/COEP, so
+// SharedArrayBuffer exists) and the threaded build is deployed at /pkg-mt/,
+// proofs run on a rayon pool of Web Workers. Otherwise the bundled
+// single-threaded build is used, exactly as before.
+import { v2ops } from './ops.v2.js';
 
+let L = null;
 let ready = null;
+let params = null;
+let v1Ready = false;
 const merchants = new Map(); // listingId -> Merchant
 const payers = new Map(); // sessionKey -> Payer
 
-async function boot() {
-  await init();
+// `threads`: undefined/-1 = auto, 0 = force single thread, n = pool size.
+async function loadEngine(threads) {
+  const want = threads === undefined || threads === null || threads === '' ? -1 : Number(threads);
+  if (self.crossOriginIsolated && typeof SharedArrayBuffer === 'function' && want !== 0) {
+    try {
+      const mt = await import(/* @vite-ignore */ new URL('/pkg-mt/lintel_wasm.js', self.location.origin).href);
+      await mt.default();
+      if (typeof mt.initThreadPool === 'function') {
+        const n = want > 0 ? want : Math.min(navigator.hardwareConcurrency || 2, 8);
+        await mt.initThreadPool(n);
+        return { lib: mt, threads: n };
+      }
+    } catch (e) {
+      console.warn('threaded engine unavailable, using single thread:', e?.message || e);
+    }
+  }
+  const st = await import('./pkg/lintel_wasm.js');
+  await st.default();
+  return { lib: st, threads: 1 };
+}
+
+async function boot({ threads } = {}) {
+  const engine = await loadEngine(threads);
+  L = engine.lib;
   const res = await fetch('/params.bin');
   if (!res.ok) throw new Error('could not load proving parameters');
   // The digest of this file is pinned inside the WASM; a swapped file is rejected.
-  L.warmUpWithParams(new Uint8Array(await res.arrayBuffer()));
-  return { maxPayload: L.maxPayloadBytes() };
+  params = new Uint8Array(await res.arrayBuffer());
+  L.warmUpV2WithParams(params);
+  return { maxPayload: L.maxPayloadBytes(), maxPayloadV2: L.maxPayloadV2(), threads: engine.threads };
+}
+
+// Single-copy (v1) keys are built on first use only.
+function ensureV1() {
+  if (!v1Ready) { L.warmUpWithParams(params); v1Ready = true; }
 }
 
 const enc = new TextEncoder();
@@ -29,11 +65,12 @@ const payer = (key) => {
 };
 
 const ops = {
-  boot: () => (ready ??= boot()),
+  boot: (args) => (ready ??= boot(args)),
 
   // ---- seller ----
   async seal({ payload }) {
     await ready;
+    ensureV1();
     const m = new L.Merchant();
     const offer = m.seal(payload);
     const out = {
@@ -66,6 +103,7 @@ const ops = {
   // ---- buyer ----
   async verifyOffer({ offer, contentHash }) {
     await ready;
+    ensureV1();
     const p = new L.Payer();
     const t = p.verifyOffer(offer, contentHash);
     p.free();
@@ -89,6 +127,8 @@ const ops = {
     return true;
   },
 };
+
+Object.assign(ops, v2ops(() => L, () => ready));
 
 function hex2u8(h) {
   const out = new Uint8Array(h.length / 2);
