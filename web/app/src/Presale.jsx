@@ -2,6 +2,7 @@
 // listing card. Protocol logic lives in presale.js.
 import { useEffect, useRef, useState } from 'react';
 import { relay, store } from './api.js';
+import { useTitle } from './site.jsx';
 import { orderV2, awaitUnlock, purchases, verifyListing, addCopies, MAX_COPIES } from './presale.js';
 
 const short = (h) => (h ? `${h.slice(0, 10)}…${h.slice(-6)}` : '');
@@ -13,9 +14,9 @@ export function copiesLabel(l) {
 }
 
 const ORDER_TEXT = {
-  awaiting_seller: 'Paid side done. Waiting for the seller’s device to come online and complete (you can close this tab).',
-  complete: 'Seller completed the signature.',
-  rejected: 'Seller rejected the order.',
+  awaiting_seller: 'Your side is done. Waiting for the seller’s device to come online and complete it. You can close this tab.',
+  complete: 'The seller completed the signature.',
+  rejected: 'The seller rejected the order.',
 };
 
 export function ListingV2({ data, boot, Steps, Notice, reload }) {
@@ -71,41 +72,44 @@ export function ListingV2({ data, boot, Steps, Notice, reload }) {
   };
 
   const canBuy = verify.state === 'ok' && L.units_open > 0 && !isMine && !busy;
+  useTitle(`${L.title} · Lintel`);
   return (
     <section className="narrow">
-      <a href="#/" className="small">← Market</a>
-      <div className="row"><h1>{L.title}</h1><span className="price big">{L.price_zec} ZEC</span></div>
-      {L.description && <p>{L.description}</p>}
+      <a href="#/" className="back">← Market</a>
+      <div className="row title-row"><h1>{L.title}</h1><span className="amt big">{L.price_zec}<span className="unit">ZEC</span></span></div>
+      {L.description && <p className="lede">{L.description}</p>}
       <dl className="facts">
-        <dt>Sealed size</dt><dd>{fmtBytes(L.size)}{L.filename ? ` · ${L.filename}` : ''}</dd>
-        <dt>Content hash</dt><dd className="mono">{short(L.content_hash)}</dd>
-        <dt>Copies</dt><dd>{copiesLabel(L)} · each copy has its own unlock key</dd>
+        <dt>Sealed size</dt><dd className="mono">{fmtBytes(L.size)}{L.filename ? ` · ${L.filename}` : ''}</dd>
+        <dt>Content hash</dt><dd className="mono" title={L.content_hash}>{short(L.content_hash)}</dd>
+        <dt>Copies</dt><dd>{copiesLabel(L)} <span className="muted small">· each copy has its own unlock key</span></dd>
         <dt>Status</dt><dd><span className={`tag ${L.status}`}>{L.status}</span></dd>
       </dl>
-      <div className={`proof ${verify.state}`}>
-        {verify.state === 'idle' && 'Waiting for prover…'}
-        {verify.state === 'run' && 'Verifying Halo 2 proof on this device…'}
-        {verify.state === 'ok' && <>✓ Proof verified in {verify.ms} ms ({verify.parts} part{verify.parts > 1 ? 's' : ''}): the copy decrypts, under its own unlock secret, to content with this exact hash. The copy you order is verified again before you pre-sign.</>}
-        {verify.state === 'bad' && <>✗ Proof rejected: {verify.error}. Do not buy.</>}
+      <div className={`proof ${verify.state}`} role="status">
+        <div>
+          {verify.state === 'idle' && 'Waiting for the prover…'}
+          {verify.state === 'run' && 'Verifying the Halo 2 proof on this device…'}
+          {verify.state === 'ok' && <><b>Proof verified</b> in <span className="mono">{verify.ms} ms</span> ({verify.parts} part{verify.parts > 1 ? 's' : ''}). The file matches the listing: each copy decrypts, under its own unlock secret, to content with this exact hash. The copy you order is checked again before you pre-sign.</>}
+          {verify.state === 'bad' && <><b>Proof rejected:</b> {verify.error}. Do not buy.</>}
+        </div>
       </div>
       <Notice />
-      {isMine && <p className="muted">This is your listing. Sales complete automatically whenever this app is open on this device.</p>}
-      {canBuy && <button className="btn" onClick={buy}>Buy a copy for {L.price_zec} ZEC</button>}
-      {busy && <p className="muted small">Verifying the copy and pre-signing…</p>}
+      {isMine && <p className="muted">This is your listing. Sales complete on their own whenever this app is open on this device.</p>}
+      {canBuy && <div className="actionbar"><button className="btn" onClick={buy}>Buy a copy for {L.price_zec} ZEC</button></div>}
+      {busy && <p className="muted small" role="status">Checking the copy and pre-signing…</p>}
       {!isMine && L.units_open === 0 && mine.length === 0 && <p className="muted">No copies left right now.</p>}
-      {err && <p className="error">{err}</p>}
+      {err && <p className="error" role="alert">{err}</p>}
       {mine.map((p) => (
         <div key={p.id} className="card">
-          <b>Your copy #{p.unit + 1}</b>
+          <div className="row"><b>Your copy <span className="mono">#{p.unit + 1}</span></b>{results[p.id] && <span className="chip ok">Unlocked</span>}</div>
           <Steps steps={[
-            ['Verify proof, pre-sign, send order', 'done', 'The seller did not need to be online'],
+            ['Verify the proof, pre-sign, send the order', 'done', 'The seller did not need to be online'],
             ['Seller completes the signature', status[p.id] === 'complete' || results[p.id] ? 'done' : String(status[p.id] || '').startsWith('error') || status[p.id] === 'rejected' ? 'fail' : 'run', ORDER_TEXT[status[p.id]] || status[p.id]],
             ['Extract this copy’s secret and decrypt', results[p.id] ? 'done' : 'wait'],
           ]} />
           {results[p.id] && (
             <div className="unlocked">
-              {results[p.id].text !== null ? <pre>{results[p.id].text}</pre> : <p className="muted">Binary file, {fmtBytes(results[p.id].bytes.length)}.</p>}
-              <button className="btn" onClick={() => download(results[p.id])}>Download</button>
+              {results[p.id].text !== null ? <pre>{results[p.id].text}</pre> : <p className="muted">Binary file, <span className="mono">{fmtBytes(results[p.id].bytes.length)}</span>.</p>}
+              <button className="btn ghost" onClick={() => download(results[p.id])}>Download</button>
             </div>
           )}
         </div>
@@ -135,8 +139,8 @@ export function SellerCardV2({ id, entry, agent, onForget, boot }) {
 
   return (
     <div className="card">
-      <div className="row"><b>{entry.title}</b>{l && <span className="price">{l.price_zec} ZEC</span>}</div>
-      <p>{l ? copiesLabel(l) : 'Checking…'}{agent?.completed ? ` · completed ${agent.completed} just now` : ''}</p>
+      <div className="row title-row"><b>{entry.title}</b>{l && <span className="amt">{l.price_zec}<span className="unit">ZEC</span></span>}</div>
+      <p><span className={`chip ${l && l.units_sold > 0 ? 'ok' : ''}`}>{l ? copiesLabel(l) : 'Checking'}</span>{agent?.completed ? <span className="small muted"> · completed {agent.completed} just now</span> : ''}</p>
       {orders.length > 0 && (
         <ul className="small muted">
           {orders.map((o) => <li key={o.id}>Copy #{o.unit + 1}: {ORDER_SELLER[o.status] || o.status}</li>)}
@@ -147,15 +151,15 @@ export function SellerCardV2({ id, entry, agent, onForget, boot }) {
       {adding?.error && <p className="small error">{adding.error}</p>}
       {adding?.form && (
         <form onSubmit={add} className="form small">
-          <label>Copies to add<input type="number" min={1} max={MAX_COPIES} value={form.copies} onChange={(e) => setForm({ ...form, copies: e.target.value })} /></label>
-          <label>Same content again (it is checked against the listing hash, never stored)
+          <label><span className="label">Copies to add</span><input className="mono" type="number" min={1} max={MAX_COPIES} value={form.copies} onChange={(e) => setForm({ ...form, copies: e.target.value })} /></label>
+          <label><span className="label">Same content again</span><span className="small muted">Checked against the listing hash, never stored.</span>
             <textarea className="mono" rows={3} disabled={!!form.file} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
           </label>
-          <label className="file">Or the same file<input type="file" onChange={(e) => setForm({ ...form, file: e.target.files[0] || null })} /></label>
-          <button className="btn" disabled={boot.state !== 'ready'}>Seal and add</button>
+          <label className="file"><span className="label">Or the same file</span><input type="file" onChange={(e) => setForm({ ...form, file: e.target.files[0] || null })} /></label>
+          <button className="btn ghost" disabled={boot.state !== 'ready'}>Seal and add</button>
         </form>
       )}
-      <div className="row small">
+      <div className="actions">
         <a href={`#/listing/${id}`}>View listing</a>
         <button className="link" onClick={() => setAdding({ form: true })}>Add copies</button>
         <button className="link danger" onClick={() => onForget(id)}>Forget keys</button>
@@ -175,7 +179,7 @@ export function Purchases() {
         {list.map((p) => (
           <a key={p.id} className="card" href={`#/listing/${p.listingId}`}>
             <b>{p.title}</b>
-            <p className="small muted">Copy #{p.unit + 1} · {p.unlocked ? 'unlocked' : 'waiting for seller'}</p>
+            <div className="meta"><span className="mono">Copy #{p.unit + 1}</span><span className={`chip ${p.unlocked ? 'ok' : 'pending'}`}>{p.unlocked ? 'unlocked' : 'waiting for seller'}</span></div>
           </a>
         ))}
       </div>
