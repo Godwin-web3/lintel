@@ -50,8 +50,10 @@ cd web/app && npm install && npm run wasm && npm run dev
 node web/e2e.mjs
 # relay tests (v1, presale, storage backends incl. a mock Upstash)
 cd web/relay && npm test
-# optional threaded engine (nightly Rust), then headless-Chromium UI test and benchmark
-cd web/app && npm run wasm:mt && npm run build
+# optional threaded engine (nightly Rust), then headless-Chromium UI test and benchmark.
+# The scripts start their own relay on RELAY_URL (default http://localhost:8787), and the
+# app only talks to the relay baked in at build time, so build with the same URL.
+cd web/app && npm run wasm:mt && VITE_RELAY_URL=http://localhost:8787 npm run build
 PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core/index.js node scripts/ui-test.mjs
 PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core/index.js node scripts/bench.mjs
 ```
