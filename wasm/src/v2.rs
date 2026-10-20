@@ -102,6 +102,23 @@ fn order_from(j: &str) -> R<Order> {
         sighash: hex::decode(&w.sighash).map_err(|_| err("invalid sighash"))?,
     })
 }
+/// Digest of exactly the unit the buyer verified (keys, points, PoK and the
+/// offer with its proofs), so unlocking later cannot be pointed at a different
+/// offer by whoever serves the unit again.
+fn unit_digest(j: &str) -> R<String> {
+    let w: UnitW = serde_json::from_str(j).map_err(|_| err("invalid unit json"))?;
+    let mut st = blake2b_simd::Params::new().hash_length(32).personal(b"Lintel_unitbind1").to_state();
+    for f in [w.t_point.as_str(), w.merchant_vk.as_str(), w.r_b.as_str(), w.pok.as_str(), w.offer.as_deref().unwrap_or("")] {
+        st.update(&(f.len() as u64).to_le_bytes());
+        st.update(f.as_bytes());
+    }
+    Ok(hex::encode(st.finalize().as_bytes()))
+}
+/// Buyer's device-local state for one order: the DH secret and the digest of
+/// the unit it verified. Legacy form: the bare DH secret (no unit binding).
+#[derive(Serialize, Deserialize)]
+struct KeepW { e: String, unit: String }
+
 fn order_to(o: &Order) -> OrderW {
     OrderW { payer_vk: ph(&o.vk_a), r_a: ph(&o.r_a), dh_point: ph(&o.e), s_a: sh(&o.s_a), payer_pok: pok_to(&o.pok), alpha: sh(&o.alpha), sighash: hex::encode(&o.sighash) }
 }
@@ -166,18 +183,26 @@ pub fn buyer_order(unit: &str, expected_hash: &str, alpha: &str, sighash: &[u8])
     verify_unit(unit, expected_hash)?;
     let (u, _) = unit_from(unit)?;
     let (o, keep) = presale::buyer_order(&u, sc(alpha, "alpha")?, sighash).map_err(err)?;
-    Ok(serde_json::json!({ "order": order_to(&o), "keep": sh(&keep.e) }).to_string())
+    let keep = serde_json::to_string(&KeepW { e: sh(&keep.e), unit: unit_digest(unit)? }).unwrap();
+    Ok(serde_json::json!({ "order": order_to(&o), "keep": keep }).to_string())
 }
 
 /// Checks the seller's completion, extracts this unit's `t`, decrypts.
 #[wasm_bindgen(js_name = buyerUnlock)]
 pub fn buyer_unlock(keep: &str, unit: &str, order: &str, completion: &str) -> R<Vec<u8>> {
+    let e = match serde_json::from_str::<KeepW>(keep) {
+        Ok(k) => {
+            if k.unit != unit_digest(unit)? { return Err(err("this copy changed since it was verified; refusing to unlock")); }
+            k.e
+        }
+        Err(_) => keep.to_string(), // legacy: bare DH secret
+    };
     let (u, offer) = unit_from(unit)?;
     let o = order_from(order)?;
     let d: DoneW = serde_json::from_str(completion).map_err(|_| err("invalid completion json"))?;
     let sig: [u8; 64] = hex::decode(&d.signature).ok().and_then(|v| v.try_into().ok()).ok_or_else(|| err("signature must be 64 bytes"))?;
     let done = Completion { sig, enc_sb: sc(&d.enc_sb, "masked share")? };
-    let t = presale::buyer_extract(&BuyerKeep { e: sc(keep, "buyer key")? }, &u, &o, &done).map_err(err)?;
+    let t = presale::buyer_extract(&BuyerKeep { e: sc(&e, "buyer key")? }, &u, &o, &done).map_err(err)?;
     let offer = offer_from(offer.as_deref().ok_or_else(|| err("unit has no offer"))?)?;
     sealed_multi::open(t, &offer).ok_or_else(|| err("decryption failed"))
 }
@@ -201,8 +226,15 @@ mod tests {
         let order = b["order"].to_string();
         assert!(check_order(&unit, &order).unwrap());
         let done = seller_complete(&secret, &order).unwrap();
-        let out = buyer_unlock(b["keep"].as_str().unwrap(), &unit, &order, &done).unwrap();
+        let keep = b["keep"].as_str().unwrap();
+        let out = buyer_unlock(keep, &unit, &order, &done).unwrap();
         assert_eq!(out, payload);
+        // The keep is bound to the verified unit: a re-served unit with any field changed has another digest.
+        let mut other: serde_json::Value = serde_json::from_str(&unit).unwrap();
+        let sealed2: serde_json::Value = serde_json::from_str(&seal_unit(&payload).unwrap()).unwrap();
+        other["offer"] = sealed2["unit"]["offer"].clone();
+        assert_ne!(unit_digest(&other.to_string()).unwrap(), unit_digest(&unit).unwrap());
+        assert_eq!(unit_digest(&unit).unwrap(), serde_json::from_str::<serde_json::Value>(keep).unwrap()["unit"].as_str().unwrap());
         // (Error paths construct JsError, which only exists on wasm; web/e2e.mjs covers them.)
         // Public output carries no secret material.
         assert!(!unit.contains(&serde_json::from_str::<serde_json::Value>(&secret).unwrap()["s"].as_str().unwrap().to_string()));
