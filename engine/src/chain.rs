@@ -45,7 +45,6 @@ use pczt::Pczt;
 use serde::{Deserialize, Serialize};
 use zcash_address::unified::{self, Encoding};
 use zcash_primitives::transaction::builder::{BundlePadding, DeferredPcztBuilder};
-use zcash_primitives::transaction::fees::zip317;
 use zcash_primitives::transaction::txid::{to_txid, TxIdDigester};
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::consensus::{BlockHeight, BranchId, NetworkType, TEST_NETWORK};
@@ -192,6 +191,169 @@ pub struct SpendTerms {
     /// Last height the transaction may be mined at (0 = no expiry). The
     /// signatures commit to it.
     pub expiry_height: u32,
+    /// Refund time lock (v2): the payer-owned transparent input that makes the
+    /// refund consensus-invalid until `lock_height + 1`. Required for `refund`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock: Option<RefundLock>,
+    /// A transparent P2PKH output (funding: creates the payer's lock UTXO).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub t_out: Option<TransparentOut>,
+}
+
+// ---------------------------------------------------------------- refund time lock (v2)
+//
+// Zcash enforces `nLockTime` only through transparent inputs: a transaction
+// is final if `nLockTime == 0`, or `nLockTime < height`, or every transparent
+// input has `nSequence == 0xffffffff` (zcashd `IsFinalTx`, Zebra's equivalent).
+// A shielded-only transaction has no inputs to make it non-final, so its lock
+// time is ignored. The refund therefore spends one small payer-owned P2PKH
+// UTXO with a non-final sequence and `nLockTime = lock_height`; it cannot be
+// mined below `lock_height + 1`. The shielded sighash (ZIP 244) commits to the
+// lock time, the transparent prevouts and sequences, so the payer cannot
+// strip the lock after the merchant has co-signed.
+
+/// `nSequence` of the refund's lock input: non-final, so `nLockTime` applies.
+pub const LOCK_SEQUENCE: u32 = 0xffff_fffe;
+/// Value of the payer's lock UTXO. The refund spends it and returns it to the
+/// same address unchanged, so it costs the payer only the extra fee.
+pub const LOCK_UTXO_VALUE: u64 = 20_000;
+/// Lock times below this are block heights.
+pub const LOCKTIME_THRESHOLD: u32 = 500_000_000;
+/// SIGHASH_ALL.
+const SIGHASH_ALL: u8 = 0x01;
+
+/// A transparent P2PKH output.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct TransparentOut {
+    /// Testnet P2PKH address (`tm…`).
+    pub address: String,
+    pub value: u64,
+}
+
+/// The refund's lock input: a payer-owned P2PKH coin, and the height before
+/// which the refund is invalid.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct RefundLock {
+    /// Txid of the coin (display hex). In Lintel it is the funding tx itself,
+    /// whose v6 txid is known before it is broadcast.
+    pub txid: String,
+    pub vout: u32,
+    pub value: u64,
+    /// Owner (testnet P2PKH `tm…`); the refund returns the coin here.
+    pub address: String,
+    /// `nLockTime`: the refund is mineable only at heights `> lock_height`.
+    pub lock_height: u32,
+}
+
+/// Testnet P2PKH address for a pubkey hash.
+pub fn encode_taddr(hash: &[u8; 20]) -> String {
+    let mut v = vec![0x1d, 0x25];
+    v.extend_from_slice(hash);
+    bs58::encode(v).with_check().into_string()
+}
+
+/// Pubkey hash of a testnet P2PKH address.
+pub fn decode_taddr(s: &str) -> Result<[u8; 20]> {
+    let v = bs58::decode(s).with_check(None).into_vec().map_err(|e| anyhow!("t-address: {e}"))?;
+    ensure!(v.len() == 22 && v[..2] == [0x1d, 0x25], "not a testnet P2PKH address");
+    Ok(v[2..].try_into().unwrap())
+}
+
+/// `OP_DUP OP_HASH160 <hash> OP_EQUALVERIFY OP_CHECKSIG`.
+pub fn p2pkh_script(hash: &[u8; 20]) -> Vec<u8> {
+    let mut s = vec![0x76, 0xa9, 0x14];
+    s.extend_from_slice(hash);
+    s.extend_from_slice(&[0x88, 0xac]);
+    s
+}
+
+/// A party's own transparent key (the payer's lock UTXO). SECRET.
+pub struct TransparentKey(pub secp256k1::SecretKey);
+
+impl TransparentKey {
+    pub fn random() -> Self {
+        loop {
+            let b: [u8; 32] = rand::random();
+            if let Ok(k) = secp256k1::SecretKey::from_secret_bytes(b) { return Self(k); }
+        }
+    }
+    pub fn from_bytes(b: [u8; 32]) -> Result<Self> {
+        secp256k1::SecretKey::from_secret_bytes(b).map(Self).map_err(|e| anyhow!("transparent key: {e}"))
+    }
+    pub fn to_bytes(&self) -> [u8; 32] { self.0.to_secret_bytes() }
+    pub fn pubkey_hash(&self) -> [u8; 20] {
+        zcash_transparent::util::hash160::hash(&secp256k1::PublicKey::from_secret_key(&self.0).serialize())
+    }
+    pub fn address(&self) -> String { encode_taddr(&self.pubkey_hash()) }
+}
+
+/// ZIP 317 fee for `ironwood_actions` (already padded) plus P2PKH inputs and
+/// outputs (150 and 34 bytes: one logical action each).
+pub fn zip317_fee(ironwood_actions: usize, t_in: usize, t_out: usize) -> u64 {
+    5_000 * (ironwood_actions + t_in.max(t_out)).max(2) as u64
+}
+
+/// The consensus finality rule (zcashd `IsFinalTx`) for a block at `height`.
+/// Height locks only; Lintel never uses time locks.
+pub fn is_final<A: zcash_primitives::transaction::Authorization>(
+    tx: &zcash_primitives::transaction::TransactionData<A>, height: u32,
+) -> bool {
+    let lt = tx.lock_time();
+    if lt == 0 { return true; }
+    if lt < LOCKTIME_THRESHOLD && lt < height { return true; }
+    tx.transparent_bundle().map_or(true, |b| b.vin.iter().all(|i| i.sequence() == u32::MAX))
+}
+
+/// Merchant's rule when co-signing the refund (before funding): the refund
+/// must carry a lock, and its first valid height must come after the last
+/// height the settlement can be mined at, so the two are never valid at the
+/// same height. `settle_expiry` is the agreed settlement expiry (the claim
+/// window), fixed at this point.
+pub fn check_refund_window(refund: &SpendTerms, settle_expiry: u32) -> Result<()> {
+    ensure!(refund.kind == "refund", "not refund terms");
+    let lock = refund.lock.as_ref().ok_or_else(|| anyhow!("refund has no time lock"))?;
+    ensure!(settle_expiry > 0, "the settlement must have an expiry height (the claim window)");
+    ensure!(lock.lock_height >= settle_expiry,
+        "refund lock height {} is below the settlement expiry {settle_expiry}: both would be valid at once", lock.lock_height);
+    Ok(())
+}
+
+/// Signs the refund's lock input (the payer's own transparent coin).
+pub fn sign_lock_input(pczt: Pczt, key: &TransparentKey) -> Result<Pczt> {
+    let mut s = Signer::new(pczt).map_err(|e| anyhow!("signer: {e:?}"))?;
+    s.sign_transparent(0, &key.0).map_err(|e| anyhow!("transparent sign: {e:?}"))?;
+    Ok(s.finish())
+}
+
+/// A fee rule that returns a fixed amount: the builder only sees the shielded
+/// side, so it is told exactly what the Ironwood bundle must release (the
+/// real ZIP 317 fee, plus transparent outputs, minus transparent inputs).
+struct Release(Zatoshis);
+impl zcash_primitives::transaction::fees::FeeRule for Release {
+    type Error = std::convert::Infallible;
+    fn fee_required<P: zcash_protocol::consensus::Parameters>(
+        &self, _: &P, _: BlockHeight,
+        _: impl IntoIterator<Item = zcash_primitives::transaction::fees::transparent::InputSize>,
+        _: impl IntoIterator<Item = usize>, _: usize, _: usize, _: usize, _: usize,
+    ) -> Result<Zatoshis, Self::Error> { Ok(self.0) }
+}
+
+fn txid_internal(display_hex: &str) -> Result<[u8; 32]> {
+    let mut b: [u8; 32] = hex::decode(display_hex)?.try_into().map_err(|_| anyhow!("txid must be 32 bytes"))?;
+    b.reverse();
+    Ok(b)
+}
+
+/// Transparent inputs and outputs `terms` call for: the lock input (returned
+/// to its owner by the first output), then `t_out`.
+fn transparent_plan(terms: &SpendTerms) -> Result<(Option<&RefundLock>, Vec<([u8; 20], u64)>)> {
+    let mut outs = Vec::new();
+    if let Some(l) = &terms.lock {
+        ensure!(l.lock_height > 0 && l.lock_height < LOCKTIME_THRESHOLD, "lock height must be a block height");
+        outs.push((decode_taddr(&l.address)?, l.value));
+    }
+    if let Some(o) = &terms.t_out { outs.push((decode_taddr(&o.address)?, o.value)); }
+    Ok((terms.lock.as_ref(), outs))
 }
 
 /// What the signers need from a PCZT, all public.
@@ -214,34 +376,54 @@ pub struct SigningInfo {
 /// Builds the unsigned, unproven PCZT spending `note` according to `terms`,
 /// with its anchor and witness deferred (ZIP 374).
 pub fn build_spend(fvk: &FullViewingKey, note: &Note, terms: &SpendTerms) -> Result<Pczt> {
-    let fee_rule = zip317::FeeRule::standard();
     let pay_to = decode_ua(&terms.pay_to)?;
     let change_to = terms.change_to.as_deref().map(decode_ua).transpose()?;
     let value = note.value().inner();
+    let (lock, t_outs) = transparent_plan(terms)?;
+    let t_in_value = lock.map_or(0, |l| l.value);
+    let t_out_value: u64 = t_outs.iter().map(|o| o.1).sum();
+    // one spend, at most two outputs: always two (padded) Ironwood actions
+    let fee = zip317_fee(2, lock.is_some() as usize, t_outs.len());
+    let release = (fee + t_out_value).checked_sub(t_in_value).ok_or_else(|| anyhow!("transparent input exceeds outputs + fee"))?;
 
-    let new_builder = || -> Result<DeferredPcztBuilder<_>> {
-        let b = DeferredPcztBuilder::new::<std::convert::Infallible>(
-            NETWORK, BlockHeight::from_u32(terms.target_height), BundlePadding::UNPADDED, BundlePadding::DEFAULT,
-        ).map_err(|e| anyhow!("builder: {e:?}"))?;
-        Ok(b.with_expiry_height(BlockHeight::from_u32(terms.expiry_height)))
-    };
-    let mut b = new_builder()?;
+    let mut b = DeferredPcztBuilder::new::<std::convert::Infallible>(
+        NETWORK, BlockHeight::from_u32(terms.target_height), BundlePadding::UNPADDED, BundlePadding::DEFAULT,
+    ).map_err(|e| anyhow!("builder: {e:?}"))?
+        .with_expiry_height(BlockHeight::from_u32(terms.expiry_height));
     b.add_ironwood_spend::<std::convert::Infallible>(fvk.clone(), *note).map_err(|e| anyhow!("spend: {e:?}"))?;
     b.add_ironwood_output::<std::convert::Infallible>(None, pay_to, zat(terms.amount)?, MemoBytes::empty())
         .map_err(|e| anyhow!("output: {e:?}"))?;
     if let Some(c) = change_to {
-        // A change output adds no action (the spend's action carries an
-        // output anyway), so the fee is the same with or without it.
-        let fee = b.get_fee(&fee_rule).map_err(|e| anyhow!("fee: {e:?}"))?.into_u64();
-        let change = value.checked_sub(terms.amount).and_then(|v| v.checked_sub(fee))
-            .ok_or_else(|| anyhow!("note value {value} < amount {} + fee {fee}", terms.amount))?;
+        let change = value.checked_sub(terms.amount).and_then(|v| v.checked_sub(release))
+            .ok_or_else(|| anyhow!("note value {value} < amount {} + fee {fee} + transparent {t_out_value}", terms.amount))?;
         if change > 0 {
             b.add_ironwood_output::<std::convert::Infallible>(None, c, zat(change)?, MemoBytes::empty())
                 .map_err(|e| anyhow!("change: {e:?}"))?;
         }
     }
-    let res = b.build_for_pczt(rng(), &fee_rule).map_err(|e| anyhow!("build: {e:?}"))?;
-    let pczt = Creator::build_from_parts(res.pczt_parts).ok_or_else(|| anyhow!("unsupported tx version"))?;
+    let res = b.build_for_pczt(rng(), &Release(zat(release)?)).map_err(|e| anyhow!("build: {e:?}"))?;
+    let mut parts = res.pczt_parts;
+    if lock.is_some() || !t_outs.is_empty() {
+        use std::collections::BTreeMap;
+        use zcash_transparent::pczt as tp;
+        let inputs = lock.map(|l| -> Result<tp::Input> {
+            tp::Input::parse(
+                txid_internal(&l.txid)?, l.vout, Some(LOCK_SEQUENCE), None, Some(l.lock_height), None,
+                l.value, p2pkh_script(&decode_taddr(&l.address)?), None, BTreeMap::new(), SIGHASH_ALL,
+                BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new(),
+            ).map_err(|e| anyhow!("lock input: {e:?}"))
+        }).transpose()?.into_iter().collect();
+        let outputs = t_outs.iter().map(|(h, v)| {
+            tp::Output::parse(*v, p2pkh_script(h), None, BTreeMap::new(), None, BTreeMap::new())
+                .map_err(|e| anyhow!("transparent output: {e:?}"))
+        }).collect::<Result<Vec<_>>>()?;
+        parts.transparent = Some(tp::Bundle::parse(inputs, outputs).map_err(|e| anyhow!("transparent bundle: {e:?}"))?);
+    }
+    // The fallback lock time must equal the input's required lock time: the
+    // spend finalizer clears per-input lock fields, after which the extractor
+    // uses the fallback. Both are checked in `check_spend`.
+    if let Some(l) = lock { parts.lock_time = l.lock_height; }
+    let pczt = Creator::build_from_parts(parts).ok_or_else(|| anyhow!("unsupported tx version"))?;
     IoFinalizer::new(pczt).finalize_io(rng()).map_err(|e| anyhow!("io finalize: {e:?}"))
 }
 
@@ -249,6 +431,10 @@ fn zat(v: u64) -> Result<Zatoshis> { Zatoshis::from_u64(v).map_err(|_| anyhow!("
 
 /// Largest amount `pay_to` can receive from `note_value` when it takes
 /// everything (refunds): note value minus the ZIP 317 fee for one spend.
+/// Refund payout from an escrow note when the refund carries the v2 time
+/// lock (one transparent input and output: 3 logical actions, 15,000 zats).
+pub fn refund_payout(note_value: u64) -> u64 { note_value.saturating_sub(zip317_fee(2, 1, 1)) }
+
 pub fn max_payout(note_value: u64) -> u64 {
     // one Ironwood spend + one output, padded to 2 actions => 2 logical actions,
     // ZIP 317 minimum is 2 * 5000 zats.
@@ -265,15 +451,45 @@ pub fn max_payout(note_value: u64) -> u64 {
 /// from the joint FVK; every other spend carries value 0 (padding); every
 /// action's value commitment and output note commitment match its stated
 /// values; value-carrying outputs pay exactly `amount` to `pay_to` and the
-/// remainder to `change_to`; the fee is the ZIP 317 fee (10,000 zats for
-/// this two-action shape).
+/// remainder to `change_to`; the transparent side is exactly the terms'
+/// lock input (non-final sequence, agreed lock time) and P2PKH outputs; the
+/// fee is the ZIP 317 fee for the shape (10,000 zats shielded-only, 15,000
+/// with the refund lock or the funding lock UTXO). A `refund` without a lock
+/// is refused.
 pub fn check_spend(pczt: &Pczt, fvk: &FullViewingKey, escrow: &Note, terms: &SpendTerms) -> Result<SigningInfo> {
     use pczt::roles::verifier::OrchardError as VE;
     let pay_to = decode_ua(&terms.pay_to)?.to_raw_address_bytes();
     let change_to = terms.change_to.as_deref().map(decode_ua).transpose()?.map(|a| a.to_raw_address_bytes());
     ensure!(*pczt.global().expiry_height() == terms.expiry_height, "expiry height differs from the agreed terms");
     ensure!(*pczt.global().consensus_branch_id() == u32::from(branch_for(terms.target_height)), "consensus branch differs");
-    ensure!(!pczt.has_data_in_pool(zcash_protocol::PoolType::TRANSPARENT), "unexpected transparent data");
+    // ---- transparent side: exactly what the terms call for, nothing else
+    if terms.kind == "refund" {
+        ensure!(terms.lock.is_some(), "a refund must carry the v2 time lock (unlocked refunds race the settlement)");
+    }
+    let (lock, t_outs) = transparent_plan(terms)?;
+    let effects = pczt.clone().into_effects().map_err(|e| anyhow!("effects: {e:?}"))?;
+    let tb = pczt.transparent();
+    match lock {
+        Some(l) => {
+            ensure!(tb.inputs().len() == 1, "expected exactly the lock input");
+            let i = &tb.inputs()[0];
+            ensure!(*i.prevout_txid() == txid_internal(&l.txid)? && *i.prevout_index() == l.vout, "lock input spends the wrong coin");
+            ensure!(*i.sequence() == Some(LOCK_SEQUENCE), "lock input sequence is final; the lock time would be ignored");
+            ensure!(*i.value() == l.value && *i.script_pubkey() == p2pkh_script(&decode_taddr(&l.address)?), "lock coin differs");
+            ensure!(effects.lock_time() == l.lock_height, "lock time {} differs from the agreed {}", effects.lock_time(), l.lock_height);
+            ensure!(*pczt.global().fallback_lock_time() == Some(l.lock_height), "fallback lock time differs (would change at finalization)");
+        }
+        None => {
+            ensure!(tb.inputs().is_empty(), "unexpected transparent input");
+            ensure!(effects.lock_time() == 0, "unexpected lock time");
+        }
+    }
+    ensure!(tb.outputs().len() == t_outs.len(), "unexpected transparent outputs");
+    for (o, (h, v)) in tb.outputs().iter().zip(&t_outs) {
+        ensure!(*o.value() == *v && *o.script_pubkey() == p2pkh_script(h), "transparent output differs from the terms");
+    }
+    let t_in_value = lock.map_or(0, |l| l.value);
+    let t_out_value: u64 = t_outs.iter().map(|o| o.1).sum();
     ensure!(!pczt.has_data_in_pool(zcash_protocol::PoolType::SAPLING), "unexpected Sapling data");
     ensure!(!pczt.has_data_in_pool(zcash_protocol::PoolType::ORCHARD), "unexpected Orchard-pool data");
     let escrow_nf = escrow.nullifier(fvk).to_bytes();
@@ -282,9 +498,11 @@ pub fn check_spend(pczt: &Pczt, fvk: &FullViewingKey, escrow: &Note, terms: &Spe
     let mut alpha = None;
     let mut rk = None;
     let (mut paid, mut change, mut outs) = (0u64, 0u64, 0u64);
+    let mut n_actions = 0usize;
     let custom = |m: String| VE::Custom(anyhow!(m));
     Verifier::new(pczt.clone())
         .with_ironwood::<anyhow::Error, _>(|bundle| {
+            n_actions = bundle.actions().len();
             for (i, a) in bundle.actions().iter().enumerate() {
                 let sp = a.spend();
                 a.verify_cv_net().map_err(VE::Verify)?;
@@ -318,8 +536,9 @@ pub fn check_spend(pczt: &Pczt, fvk: &FullViewingKey, escrow: &Note, terms: &Spe
     let index = escrow_index.ok_or_else(|| anyhow!("the escrow note is not spent"))?;
     let alpha = alpha.ok_or_else(|| anyhow!("escrow spend has no alpha"))?;
     ensure!(paid == terms.amount, "pays {paid} instead of the agreed {}", terms.amount);
-    let fee = escrow.value().inner().checked_sub(outs).ok_or_else(|| anyhow!("outputs exceed input"))?;
-    ensure!(fee == 10_000, "fee {fee} is not the ZIP 317 fee for this shape (10000)");
+    let fee = (escrow.value().inner() + t_in_value).checked_sub(outs + t_out_value).ok_or_else(|| anyhow!("outputs exceed input"))?;
+    let want = zip317_fee(n_actions, lock.is_some() as usize, t_outs.len());
+    ensure!(fee == want, "fee {fee} is not the ZIP 317 fee for this shape ({want})");
 
     let signer = Signer::new(pczt.clone()).map_err(|e| anyhow!("signer: {e:?}"))?;
     Ok(SigningInfo {
