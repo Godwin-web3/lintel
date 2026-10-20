@@ -1103,6 +1103,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake2b_simd",
+ "bs58",
  "ff",
  "group",
  "halo2_gadgets",
@@ -1116,6 +1117,7 @@ dependencies = [
  "prost",
  "rand 0.10.3",
  "rand_core 0.10.1",
+ "secp256k1",
  "serde",
  "serde_json",
  "tokio",
@@ -1125,6 +1127,7 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_protocol",
+ "zcash_transparent",
 ]
 
 [[package]]
