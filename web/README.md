@@ -47,8 +47,11 @@ node web/e2e.mjs
 
 ## Current limits (be honest in demos)
 
-- **No on-chain settlement yet.** The completed signature travels through the relay rather than inside a broadcast Orchard transaction, and `sighash`/`alpha` are random placeholders. Next step: WebZjs (lightwalletd via gRPC-web) + PCZT, with the joint key bound to the note's `ak`.
+- **The pages run the off-chain demo flow.** In the pages, the completed signature still travels through the relay and `sighash`/`alpha` are placeholders.
+  On-chain settlement works on testnet through `lintel-chain` (see [docs/onchain.md](../docs/onchain.md)).
+  The worker already exposes `merchantBindJoint`, `payerBindJoint`, `verifyPayerKnowledge`, `refundPartial`, `refundSign` and `unlockFromTx`.
+  The relay stores write-once public settlement fields (`POST /sessions/:id/chain/:field`) and proxies mined transactions from lightwalletd (`GET /chain/tx/:txid`), so `t` can be taken from the chain instead of the relay.
 - **One sale per listing.** `t` becomes public after the first completed signature.
 - **Up to 1,953 bytes** of content per listing. Sealing takes ~30 s in a browser (single-threaded); verifying ~0.5 s.
 - **Seller must be online** (My sales page open) while a buyer purchases.
-- No refund/timeout path yet.
+- Refund: implemented on chain (pre-signed before funding, v6 deferred anchors), not yet in the pages.

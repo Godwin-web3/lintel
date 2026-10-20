@@ -87,7 +87,7 @@ pub fn content_hash(payload: &[u8]) -> R<String> {
 // ---------- wire types ----------
 
 #[derive(Serialize, Deserialize)]
-struct MerchantState { sk_b: String, secret: String }
+struct MerchantState { sk_b: String, secret: String, #[serde(default)] negated: bool }
 #[derive(Serialize, Deserialize)]
 struct PokWire { r_point: String, s: String }
 #[derive(Serialize, Deserialize)]
@@ -121,7 +121,19 @@ fn offer_from(j: &str) -> R<SealedOffer> {
 pub struct Merchant {
     inner: protocol::Buyer,
     secret: pasta_curves::pallas::Base,
+    /// Both shares were negated to give the joint key ỹ = 0 (see `bindJoint`).
+    negated: bool,
 }
+
+/// Peer key as used after `bindJoint`: callers keep passing the key the peer
+/// originally published; it is negated here when the shares were.
+fn peer_key(h: &str, what: &str, negated: bool) -> R<Point> {
+    let p = pt(h, what)?;
+    Ok(if negated { -p } else { p })
+}
+
+#[derive(Serialize)]
+struct JointWire { ak: String, negated: bool }
 
 #[wasm_bindgen]
 impl Merchant {
@@ -129,14 +141,14 @@ impl Merchant {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Merchant {
         let (t, s) = sealed::new_secret();
-        Merchant { inner: protocol::Buyer::with_secret(t), secret: s }
+        Merchant { inner: protocol::Buyer::with_secret(t), secret: s, negated: false }
     }
 
     /// Device-local backup of this merchant (signing share and adaptor
     /// secret). SECRET: store only on the seller's device, never upload.
     #[wasm_bindgen(js_name = exportState)]
     pub fn export_state(&self) -> String {
-        serde_json::to_string(&MerchantState { sk_b: sc_hex(&self.inner.sk_b), secret: sealed::field_hex(&self.secret) }).unwrap()
+        serde_json::to_string(&MerchantState { sk_b: sc_hex(&self.inner.sk_b), secret: sealed::field_hex(&self.secret), negated: self.negated }).unwrap()
     }
 
     /// Restores a merchant saved with `exportState`.
@@ -145,7 +157,7 @@ impl Merchant {
         let w: MerchantState = serde_json::from_str(json).map_err(|_| err("invalid merchant state"))?;
         let sk_b = sc(&w.sk_b, "signing share")?;
         let secret = sealed::parse_field(&w.secret).ok_or_else(|| err("invalid secret"))?;
-        Ok(Merchant { inner: protocol::Buyer::from_parts(sk_b, sealed::scalar_from_base(secret)), secret })
+        Ok(Merchant { inner: protocol::Buyer::from_parts(sk_b, sealed::scalar_from_base(secret)), secret, negated: w.negated })
     }
 
     /// Adaptor point T, hex. Public.
@@ -165,12 +177,42 @@ impl Merchant {
     /// Proof of knowledge of the key share, bound to both keys and the session.
     #[wasm_bindgen(js_name = proveKnowledge)]
     pub fn prove_knowledge(&self, payer_vk: &str, session: &[u8]) -> R<String> {
-        Ok(pok_to(&self.inner.prove_knowledge(pt(payer_vk, "payer key")?, session)))
+        Ok(pok_to(&self.inner.prove_knowledge(peer_key(payer_vk, "payer key", self.negated)?, session)))
+    }
+
+    /// Binds this merchant to the on-chain escrow key `ak = vk_payer + vk_merchant`
+    /// (the spend validating key of the escrow note). Negates this share if
+    /// the sum has ỹ = 1; the payer does the same on its side. Idempotent.
+    /// Pass the payer key as published. Returns `{ak, negated}`.
+    #[wasm_bindgen(js_name = bindJoint)]
+    pub fn bind_joint(&mut self, payer_vk: &str) -> R<String> {
+        let p = peer_key(payer_vk, "payer key", self.negated)?;
+        let (ak, neg) = protocol::joint_ak(p, self.inner.vk_b).map_err(err)?;
+        if neg { self.inner.negate_share(); self.negated = !self.negated; }
+        Ok(serde_json::to_string(&JointWire { ak: pt_hex(&ak), negated: self.negated }).unwrap())
+    }
+
+    /// Checks the payer's proof of knowledge of its key share (bound to both
+    /// keys and the session). Do this before the escrow is funded: it rules
+    /// out a rogue payer key chosen to make the joint key the payer's alone.
+    #[wasm_bindgen(js_name = verifyPayerKnowledge)]
+    pub fn verify_payer_knowledge(&self, payer_vk: &str, pok: &str, session: &[u8]) -> R<bool> {
+        let p = peer_key(payer_vk, "payer key", self.negated)?;
+        Ok(protocol::verify_knowledge(p, &pok_from(pok)?, p, self.inner.vk_b, session))
     }
 
     /// Partial signature over `sighash` given the payer's nonce point.
     pub fn partial(&self, payer_nonce: &str, payer_vk: &str, alpha: &str, sighash: &[u8]) -> R<String> {
-        let p = self.inner.partial(pt(payer_nonce, "nonce")?, pt(payer_vk, "payer key")?, sc(alpha, "alpha")?, sighash);
+        let p = self.inner.partial(pt(payer_nonce, "nonce")?, peer_key(payer_vk, "payer key", self.negated)?, sc(alpha, "alpha")?, sighash);
+        Ok(partial_to(&p))
+    }
+
+    /// Partial for the REFUND transaction (adaptor secret fixed to zero): the
+    /// payer can complete the refund signature with it alone. Give it before
+    /// the payer broadcasts the funding transaction.
+    #[wasm_bindgen(js_name = refundPartial)]
+    pub fn refund_partial(&self, payer_nonce: &str, payer_vk: &str, alpha: &str, sighash: &[u8]) -> R<String> {
+        let p = self.inner.refund_partial(pt(payer_nonce, "nonce")?, peer_key(payer_vk, "payer key", self.negated)?, sc(alpha, "alpha")?, sighash);
         Ok(partial_to(&p))
     }
 
@@ -178,7 +220,7 @@ impl Merchant {
     #[wasm_bindgen(js_name = verifyPresig)]
     pub fn verify_presig(&self, presig: &str, payer_nonce: &str, partial: &str, payer_vk: &str, alpha: &str) -> R<bool> {
         let p = partial_from(partial)?;
-        Ok(self.inner.verify_presig(&presig_from(presig)?, pt(payer_nonce, "nonce")?, p.r_b, pt(payer_vk, "payer key")?, sc(alpha, "alpha")?))
+        Ok(self.inner.verify_presig(&presig_from(presig)?, pt(payer_nonce, "nonce")?, p.r_b, peer_key(payer_vk, "payer key", self.negated)?, sc(alpha, "alpha")?))
     }
 
     /// Completes the signature (64 bytes, hex). Broadcasting it reveals t.
@@ -195,12 +237,22 @@ impl Default for Merchant { fn default() -> Self { Self::new() } }
 // ---------- payer (buys, extracts t) ----------
 
 #[wasm_bindgen]
-pub struct Payer { inner: protocol::Seller }
+pub struct Payer { inner: protocol::Seller, negated: bool }
 
 #[wasm_bindgen]
 impl Payer {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Payer { Payer { inner: protocol::Seller::new() } }
+    pub fn new() -> Payer { Payer { inner: protocol::Seller::new(), negated: false } }
+
+    /// Binds to the escrow key (see `Merchant::bindJoint`). Pass the
+    /// merchant key as published. Returns `{ak, negated}`.
+    #[wasm_bindgen(js_name = bindJoint)]
+    pub fn bind_joint(&mut self, merchant_vk: &str) -> R<String> {
+        let m = peer_key(merchant_vk, "merchant key", self.negated)?;
+        let (ak, neg) = protocol::joint_ak(self.inner.vk_a, m).map_err(err)?;
+        if neg { self.inner.negate_share(); self.negated = !self.negated; }
+        Ok(serde_json::to_string(&JointWire { ak: pt_hex(&ak), negated: self.negated }).unwrap())
+    }
 
     #[wasm_bindgen(js_name = verificationKey)]
     pub fn verification_key(&self) -> String { pt_hex(&self.inner.vk_a) }
@@ -219,7 +271,7 @@ impl Payer {
 
     #[wasm_bindgen(js_name = proveKnowledge)]
     pub fn prove_knowledge(&self, merchant_vk: &str, session: &[u8]) -> R<String> {
-        Ok(pok_to(&self.inner.prove_knowledge(pt(merchant_vk, "merchant key")?, session)))
+        Ok(pok_to(&self.inner.prove_knowledge(peer_key(merchant_vk, "merchant key", self.negated)?, session)))
     }
 
     /// Single-use nonce point R_a, hex.
@@ -234,9 +286,34 @@ impl Payer {
             return Err(err("partial is locked to a different T than the verified offer"));
         }
         let pre = self.inner
-            .pre_sign(pt(merchant_vk, "merchant key")?, &p, sighash, session, &pok_from(merchant_pok)?, sc(alpha, "alpha")?)
+            .pre_sign(peer_key(merchant_vk, "merchant key", self.negated)?, &p, sighash, session, &pok_from(merchant_pok)?, sc(alpha, "alpha")?)
             .map_err(err)?;
         Ok(serde_json::to_string(&pre).unwrap())
+    }
+
+    /// Signs the REFUND transaction with the merchant's refund partial and
+    /// returns the complete 64-byte signature (hex). Needs a fresh `nonce()`
+    /// first. Do this before broadcasting the funding transaction.
+    #[wasm_bindgen(js_name = refundSign)]
+    pub fn refund_sign(&mut self, merchant_vk: &str, partial: &str, sighash: &[u8], session: &[u8], merchant_pok: &str, alpha: &str) -> R<String> {
+        let p = partial_from(partial)?;
+        let pre = self.inner
+            .pre_sign(peer_key(merchant_vk, "merchant key", self.negated)?, &p, sighash, session, &pok_from(merchant_pok)?, sc(alpha, "alpha")?)
+            .map_err(err)?;
+        let sig = self.inner.complete_refund(&pre, &p).ok_or_else(|| err("refund partial is invalid or locked to a secret"))?;
+        Ok(hex::encode(sig))
+    }
+
+    /// Recovers t from the MINED settlement transaction (raw bytes, from any
+    /// untrusted source) and decrypts the offer. The signature is located by
+    /// the pre-agreed nonce commitment R and verified under rk and the sighash
+    /// this payer signed, so neither the relay nor the merchant is trusted.
+    #[wasm_bindgen(js_name = unlockFromTx)]
+    pub fn unlock_from_tx(&self, raw_tx: &[u8], presig: &str, partial: &str, offer: &str) -> R<Vec<u8>> {
+        let pre = presig_from(presig)?;
+        let sig = protocol::find_signature(raw_tx, &pre.r_hex, &pre.vk_hex, &pre.sighash_hex)
+            .ok_or_else(|| err("the settlement signature is not in this transaction"))?;
+        self.unlock(&hex::encode(sig), presig, partial, offer)
     }
 
     /// Recovers t from the final on-chain signature and decrypts the offer.
@@ -279,6 +356,65 @@ mod tests {
         assert!(merchant.verify_presig(&pre, &r_a, &partial, &payer.verification_key(), &alpha).unwrap());
         let sig = merchant.complete(&pre, &partial).unwrap();
         assert_eq!(payer.unlock(&sig, &pre, &partial, &offer).unwrap(), payload.to_vec());
+    }
+}
+
+#[cfg(test)]
+mod onchain_tests {
+    use super::*;
+
+    #[test]
+    fn joint_binding_refund_and_unlock_from_tx_bytes() {
+        let payload = b"sealed for the chain";
+        let mut merchant = Merchant::from_state(&Merchant::new().export_state()).unwrap();
+        let mut payer = Payer::new();
+        let (m_vk, p_vk) = (merchant.verification_key(), payer.verification_key());
+        let a = payer.bind_joint(&m_vk).unwrap();
+        let b = merchant.bind_joint(&p_vk).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(payer.bind_joint(&m_vk).unwrap(), a, "idempotent");
+        // negation survives export/restore
+        let mut merchant = Merchant::from_state(&merchant.export_state()).unwrap();
+        assert_eq!(merchant.bind_joint(&p_vk).unwrap(), b);
+        let ak: serde_json::Value = serde_json::from_str(&a).unwrap();
+        let ak_bytes = hex::decode(ak["ak"].as_str().unwrap()).unwrap();
+        assert_eq!(ak_bytes[31] & 0x80, 0);
+
+        let offer = merchant.seal(payload).unwrap();
+        let t = payer.verify_offer(&offer, &content_hash(payload).unwrap()).unwrap();
+        let session = b"listing-onchain";
+        let alpha = sc_hex(&Scalar::from(11u64));
+
+        // rogue-key checks before funding: both proofs of knowledge
+        let pok_p = payer.prove_knowledge(&m_vk, session).unwrap();
+        assert!(merchant.verify_payer_knowledge(&p_vk, &pok_p, session).unwrap());
+        assert!(!merchant.verify_payer_knowledge(&p_vk, &pok_p, b"other-session").unwrap());
+
+        // refund first (before funding)
+        let r_a = payer.nonce();
+        let rp = merchant.refund_partial(&r_a, &p_vk, &alpha, b"refund-sighash").unwrap();
+        let pok = merchant.prove_knowledge(&p_vk, session).unwrap();
+        let rsig = payer.refund_sign(&m_vk, &rp, b"refund-sighash", session, &pok, &alpha).unwrap();
+        let rk = (parse_point(ak["ak"].as_str().unwrap()).unwrap() + Point::from_bytes(&lintel::protocol::ORCHARD_BASEPOINT).unwrap() * Scalar::from(11u64)).to_bytes();
+        assert!(protocol::verify_sig(&hex::encode(rk), &hex::encode(b"refund-sighash"), &hex::decode(&rsig).unwrap().try_into().unwrap()));
+        // (a partial locked to T is refused as a refund: engine test
+        // protocol::refund_completes_without_counterparty_and_rejects_locked_partial;
+        // error paths build a JsError, which only works on wasm32.)
+
+        // settlement
+        let r_a = payer.nonce();
+        let partial = merchant.partial(&r_a, &p_vk, &alpha, b"settle-sighash").unwrap();
+        let pok = merchant.prove_knowledge(&p_vk, session).unwrap();
+        let pre = payer.pre_sign(&m_vk, &partial, b"settle-sighash", session, &pok, &alpha, &t).unwrap();
+        assert!(merchant.verify_presig(&pre, &r_a, &partial, &p_vk, &alpha).unwrap());
+        let sig = merchant.complete(&pre, &partial).unwrap();
+        let pre_v: serde_json::Value = serde_json::from_str(&pre).unwrap();
+        assert_eq!(pre_v["vk_hex"].as_str().unwrap(), hex::encode(rk));
+        // fake "transaction": the signature embedded among other bytes
+        let mut tx = vec![0x55u8; 300];
+        tx.extend_from_slice(&hex::decode(&sig).unwrap());
+        tx.extend_from_slice(&[0xaa; 100]);
+        assert_eq!(payer.unlock_from_tx(&tx, &pre, &partial, &offer).unwrap(), payload.to_vec());
     }
 }
 

@@ -83,6 +83,29 @@ const ops = {
     const bytes = payer(key).unlock(signature, presig, partial, offer);
     return bytes;
   },
+  // ---- on-chain settlement (testnet; chain steps via lintel-chain, docs/onchain.md) ----
+  // Both sides bind to the escrow key ak = vk_payer + vk_merchant and check
+  // each other's proof of knowledge BEFORE the escrow is funded. sighash and
+  // alpha then come from each side's own `lintel-chain check` of the agreed
+  // PCZT, never from the counterparty.
+  merchantBindJoint({ key, payerVk }) { return JSON.parse(merchant(key).bindJoint(payerVk)); },
+  payerBindJoint({ key, merchantVk }) { return JSON.parse(payer(key).bindJoint(merchantVk)); },
+  verifyPayerKnowledge({ key, payerVk, pok, sessionId }) { return merchant(key).verifyPayerKnowledge(payerVk, pok, enc.encode(sessionId)); },
+  payerProveKnowledge({ key, merchantVk, sessionId }) { return payer(key).proveKnowledge(merchantVk, enc.encode(sessionId)); },
+  payerNonce({ key }) { return payer(key).nonce(); },
+  refundPartial({ key, payerVk, rA, alpha, sighash, sessionId }) {
+    const m = merchant(key);
+    return { partial: m.refundPartial(rA, payerVk, alpha, hex2u8(sighash)), pok: m.proveKnowledge(payerVk, enc.encode(sessionId)) };
+  },
+  refundSign({ key, merchantVk, partial, sighash, sessionId, pok, alpha }) {
+    return payer(key).refundSign(merchantVk, partial, hex2u8(sighash), enc.encode(sessionId), pok, alpha);
+  },
+  // rawTx: hex of the MINED settlement transaction (relay GET /chain/tx/:txid
+  // or any other source); the signature inside is verified against this
+  // payer's own rk and sighash.
+  unlockFromTx({ key, rawTx, presig, partial, offer }) {
+    return payer(key).unlockFromTx(hex2u8(rawTx), presig, partial, offer);
+  },
   rebindPayer({ from, to }) {
     payers.set(to, payer(from));
     payers.delete(from);

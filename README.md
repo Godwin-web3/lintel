@@ -10,7 +10,7 @@ Conditional settlement on Zcash using two-party adaptor signatures.
 2. Buyer computes `s_b = r_b + c·sk_b` from `R_a` (never sees `r_a`).
 3. Seller checks the buyer's knowledge proof and `s_b·G == R_b + c·vk_b`, then sends `s_a`.
 4. Buyer recomputes `R = R_a + R_b + T`, checks `vk_hex` against `rk`, and verifies `s_a` before completing.
-5. Seller extracts `t = s − s_a − s_b` without learning `sk_b`.
+5. Seller extracts `t = s − s_a − s_b` without learning `sk_b`. On chain, it reads `s` from the mined transaction.
 
 ## Sealed goods (pay to decrypt)
 
@@ -32,6 +32,27 @@ Public inputs: `[T.x, T.y, h, c_0..c_{N-1}]`. The payer runs `verify_offer` agai
 ```bash
 cargo run --release --bin lintel-cli -- sealed-demo "your secret payload"
 # {"offer_verified":true,"paid_ok":true,"decrypted_ok":true,"proof_bytes":4352,...}
+```
+
+## On-chain settlement (Zcash testnet)
+
+Full design and evidence: [docs/onchain.md](docs/onchain.md).
+
+The escrow is a real **Ironwood** note on testnet (NU7, v6 transactions). Its spend validating key is the two-party
+adaptor key, so `ak = vk_payer + vk_merchant`. The signatures sign the real PCZT sighash with the PCZT's `alpha`.
+The payer recovers `t` from the mined transaction, and a refund is co-signed before the escrow is funded.
+
+| Testnet | txid | Height |
+| --- | --- | --- |
+| Sale 1 funding → escrow | `da340dee5bb4a8ec11872d184c884b38aabfba3060a68e76d17df32628d6cf91` | 4,521,270 |
+| Sale 1 adaptor-signed settlement (t extracted from chain, content decrypted) | `8b4ada0992642b2a71649e08c8de8d0b00cdf90a46a2794d4e09ca7999a3c0a8` | 4,521,277 |
+| Sale 2 funding → escrow | `f11c111d89e870b69ade0478f7331f0e8131bac7c596846a8327832a16a235e4` | 4,521,282 |
+| Sale 2 refund (pre-signed before funding, payer alone) | `633ac619a5305b961d0d3187f26cc61f6b9211a49b3bb787a30d044aee6a3f03` | 4,521,289 |
+
+```bash
+cd engine
+cargo test --release --features chain --test settlement      # offline: fund, refund, settle, prove, verify, extract t
+cargo build --release --features net --bin lintel-chain --example testnet_sale
 ```
 
 ## Web app
@@ -66,5 +87,10 @@ cargo run --bin lintel-cli -- demo
 
 ## Not yet done
 
-- reddsa SpendAuth cross-check.
-- Testnet transaction with this flow.
+- The browser pages still run the off-chain demo flow. The on-chain flow runs through `lintel-chain` and the
+  `testnet_sale` harness. The wasm bindings (`bindJoint`, `verifyPayerKnowledge`, `refundPartial`, `refundSign`,
+  `unlockFromTx`) and the relay's chain fields and `/chain/tx` proxy are ready for wiring.
+- The refund has no lower-bound timelock: a shielded-only tx ignores `nLockTime`. The fix is specified in
+  [docs/onchain.md](docs/onchain.md#5-refund-and-timeout).
+- Done in this branch: the reddsa SpendAuth cross-check (`apply_ironwood_signature` verifies every completed signature)
+  and testnet transactions with this flow.

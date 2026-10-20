@@ -48,4 +48,7 @@ export const randomAlpha = () => {
   return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 };
 
+// Raw mined transaction (public) via the relay's lightwalletd proxy.
+export const chainTx = (txid) => relay('GET', `/chain/tx/${txid}`);
+
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
