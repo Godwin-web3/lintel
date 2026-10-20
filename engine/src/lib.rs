@@ -7,3 +7,5 @@ mod spend_auth_g;
 pub mod chain;
 #[cfg(feature = "net")]
 pub mod lwd;
+pub mod sealed_multi;
+pub mod presale;
