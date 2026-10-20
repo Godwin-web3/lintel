@@ -3,3 +3,4 @@ dist/
 src/pkg/
 public/params.bin
 .env*
+public/pkg-mt/
