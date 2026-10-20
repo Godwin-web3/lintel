@@ -75,6 +75,8 @@ Proving and full verification run in the browser.
 | --- | --- | --- |
 | Funding (buyer device wallet → joint escrow, price 0.02 TAZ, + 20,000-zat lock coin) | `75053762c15aea7b27fad758928fc3009ca86d5ee3a10e35b17162914c302534` | 4,522,583 |
 | Settlement (seller browser, adaptor-signed; expiry 4,522,639) | `c51697ebe0767395dee5fc54f246eccf53dc2e071f5690808ec77776939b2b67` | 4,522,588 |
+| Earlier attempt: funding (mined, never settled) | `90446dccc95818de8808046167985311e0a6715c3580fa0de9fd24a41f8c9842` | 4,522,575 |
+| Earlier attempt: pre-signed time-locked refund (lock 4,522,631) | `992163c4a20b3cc2e363b3720aeac8f25162c81bc795736d285b0b1bd3e43392` | 4,522,635 |
 
 The buyer's browser fetched the mined settlement, recovered `t` from its spend-auth
 signature, and the decrypted payload matched the sealed secret (`decrypted_matches: true`).
@@ -87,7 +89,7 @@ but the app reported the broadcast as rejected: testnet lightwalletd returns the
 JSON-quoted on success and the relay did not accept that form. Fixed in the relay (quoted txid =
 accepted) and in the app (on a rejection, a txid the node already knows counts as broadcast).
 That sale never settled; its escrow is recovered with the pre-signed time-locked refund via
-`web/app/scripts/refund-from-state.mjs` once the chain passes block 4,522,631 (refund txid `992163c4a20b3cc2e363b3720aeac8f25162c81bc795736d285b0b1bd3e43392`; not yet broadcast at the time of writing).
+`web/app/scripts/refund-from-state.mjs` after its lock: refund `992163c4a20b3cc2e363b3720aeac8f25162c81bc795736d285b0b1bd3e43392` mined at height 4,522,635 (nLockTime 4,522,631). Record: [`testnet/evidence-browser-refund.json`](testnet/evidence-browser-refund.json).
 
 Browser-flow limits (as of this branch):
 
