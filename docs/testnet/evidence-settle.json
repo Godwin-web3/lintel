@@ -1,0 +1,30 @@
+{
+  "branch": "77190ad9",
+  "escrow_address": "utest1azw74le4084s6xnsww50smrm2n74ztw5y6stmdfmga7yaj5jzp4rhjvhgepft0eyzvy7lw6ufeg7jcljwu9pfdd68edzugxh0vqw4mug",
+  "funding": {
+    "escrow_value": 3000000,
+    "height": 4521270,
+    "txid": "da340dee5bb4a8ec11872d184c884b38aabfba3060a68e76d17df32628d6cf91"
+  },
+  "joint_ak": "cb807595b9635dbe5c068146edfa542a135cbe2bcf36b2f5726a2f241b38780c",
+  "network": "testnet",
+  "pool": "Ironwood",
+  "refund_presigned_before_funding": {
+    "rk": "143db7e37f15ad1ef28bbe913a100555b52fe8e3b43c8084bd1072fbb2c20b32",
+    "sighash": "3b5c071ad24b66345ea57a272f9214bb7fd99dd23042f8bc918c3236bd95216c",
+    "status": "now conflicts with the settlement (same escrow nullifier); never broadcast",
+    "txid": "6c2195bd36328c91bcf84230d29dd97fbb14922f277aa55e34664bd21a075c3b"
+  },
+  "settlement": {
+    "alpha_from_pczt": true,
+    "decrypted_ok": true,
+    "expiry_height": 4521300,
+    "height": 4521277,
+    "merchant_received": 2000000,
+    "rk": "cbba7a8f019bb711d2a76771514773ebb6db5f243cdea42c5c7ad7f611ab9932",
+    "sighash": "a8c0a39979ca094e4d79a2460af9cd000b8ddec8089e64712a2b649209da4a8b",
+    "t_recovered_from_mined_tx": true,
+    "txid": "8b4ada0992642b2a71649e08c8de8d0b00cdf90a46a2794d4e09ca7999a3c0a8"
+  },
+  "tx_version": "v6"
+}
