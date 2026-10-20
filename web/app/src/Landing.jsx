@@ -21,7 +21,7 @@ function Receipt() {
         <dt>Price</dt><dd><span className="amt">{s.price_taz}<span className="unit">TAZ</span></span></dd>
         <dt>Escrow funded</dt><dd>block {n(s.funding.height)}</dd>
         <dt>Settled</dt><dd>block {n(s.settlement.height)}</dd>
-        <dt>Key taken from</dt><dd>mined transaction</dd>
+        <dt>Key source</dt><dd>mined tx</dd>
         <dt>Relay saw signature</dt><dd>{s.relay_saw_signature ? 'yes' : 'no'}</dd>
         <dt>Decrypted file matches</dt><dd className={s.decrypted_matches ? 'ok-text' : 'error'}>{String(s.decrypted_matches)}</dd>
       </dl>
@@ -37,17 +37,16 @@ function Trilithon() {
   // Brand mark on its 96-unit grid, scaled 4x, with quiet annotations.
   return (
     <figure className="tri-figure" aria-label="Diagram: two posts carry one beam. The posts are the buyer's and seller's key shares; the beam is the settlement signature that reveals the key.">
-      <svg viewBox="0 0 400 330" role="img" aria-hidden="true">
+      <svg viewBox="0 0 400 340" role="img" aria-hidden="true">
+        <text x="40" y="38">Beam · the settlement</text>
         <rect x="40" y="56" width="320" height="68" fill="#F4B728" />
+        <text x="200" y="97" textAnchor="middle" className="v" style={{ fill: '#0E0F11' }}>s = s_a + s_b + t</text>
         <rect x="76" y="148" width="84" height="164" fill="#ECE6DA" />
         <rect x="240" y="148" width="84" height="164" fill="#ECE6DA" />
-        <line x1="160" y1="312" x2="240" y2="312" stroke="#2A2E35" strokeDasharray="3 4" />
-        <text x="40" y="36">Beam · the settlement</text>
-        <text x="200" y="98" textAnchor="middle" className="v" style={{ fill: '#0E0F11' }}>s = s_a + s_b + t</text>
-        <text x="200" y="236" textAnchor="middle">doorway</text>
-        <text x="200" y="256" textAnchor="middle" className="v">t opens the file</text>
-        <text x="118" y="328" textAnchor="middle">Buyer share</text>
-        <text x="282" y="328" textAnchor="middle">Seller share</text>
+        <text x="200" y="238" textAnchor="middle" className="v">t</text>
+        <line x1="166" y1="312" x2="234" y2="312" stroke="#8C929C" strokeDasharray="2 4" />
+        <text x="118" y="336" textAnchor="middle">Buyer</text>
+        <text x="282" y="336" textAnchor="middle">Seller</text>
       </svg>
     </figure>
   );
@@ -71,7 +70,7 @@ export default function Landing() {
           <div className="wrap">
             <div>
               <div className="label">Zcash testnet · Open source</div>
-              <h1 className="display">Pay to unlock.<br /><em>Proven</em> before you pay.</h1>
+              <h1 className="display"><span className="line">Pay to unlock.</span> <span className="line"><em>Proven</em> before you pay.</span></h1>
               <p className="lede">
                 Lintel sells sealed files for Zcash. Before paying, the buyer’s browser checks a zero-knowledge
                 proof that the ciphertext opens to exactly the content that was promised. The payment signature

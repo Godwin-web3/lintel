@@ -220,8 +220,9 @@ section.band { border-bottom: 1px solid var(--slate); padding: 112px 0; }
 
 /* hero */
 .hero { padding: 104px 0 96px; border-bottom: 1px solid var(--slate); }
-.hero .wrap { display: grid; grid-template-columns: 1.25fr 1fr; gap: 64px; align-items: end; }
-.hero h1 { font-size: 88px; line-height: 0.98; margin: 20px 0 28px; letter-spacing: -0.02em; }
+.hero .wrap { display: grid; grid-template-columns: 1.5fr 1fr; gap: 56px; align-items: end; }
+.hero h1 { font-size: 78px; line-height: 1; margin: 20px 0 28px; letter-spacing: -0.02em; }
+.hero h1 .line { display: block; white-space: nowrap; }
 .hero .lede { font-size: 18px; margin-bottom: 36px; }
 .ctas { display: flex; gap: 12px; flex-wrap: wrap; }
 .receipt { border: 1px solid var(--slate); border-radius: var(--r-lg); background: var(--basalt); }
@@ -248,8 +249,8 @@ section.band { border-bottom: 1px solid var(--slate); padding: 112px 0; }
 .tri { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; align-items: center; }
 .tri-figure { border: 1px solid var(--slate); border-radius: var(--r-lg); padding: 40px; background: var(--basalt); }
 .tri-figure svg { width: 100%; height: auto; }
-.tri-figure text { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; fill: var(--ash); }
-.tri-figure text.v { fill: var(--bone); font-size: 13px; letter-spacing: 0; text-transform: none; }
+.tri-figure text { font-family: var(--font-mono); font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; fill: var(--ash); }
+.tri-figure text.v { fill: var(--bone); font-size: 17px; letter-spacing: 0; text-transform: none; }
 .tri dl { margin: 32px 0 0; border-top: 1px solid var(--slate); }
 .tri dl div { display: grid; grid-template-columns: 120px 1fr; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--slate); }
 .tri dt { font: 11px/1.8 var(--font-mono); text-transform: uppercase; letter-spacing: 0.12em; color: var(--ash); }
@@ -278,9 +279,10 @@ section.band { border-bottom: 1px solid var(--slate); padding: 112px 0; }
 .evidence { width: 100%; border-collapse: collapse; font-size: 14px; }
 .evidence th { text-align: left; font: 11px var(--font-mono); text-transform: uppercase; letter-spacing: 0.12em; color: var(--ash); font-weight: 400; padding: 12px 16px 12px 0; border-bottom: 1px solid var(--slate); }
 .evidence td { padding: 16px 16px 16px 0; border-bottom: 1px solid var(--slate); vertical-align: top; }
+.evidence td.what { width: 40%; }
 .evidence td.h { font-family: var(--font-mono); white-space: nowrap; text-align: right; padding-right: 0; }
 .evidence th.h { text-align: right; padding-right: 0; }
-.txid { font-family: var(--font-mono); font-size: 12.5px; color: var(--chalk); word-break: break-all; }
+.txid { font-family: var(--font-mono); font-size: 12px; color: var(--chalk); word-break: break-all; }
 .evidence .what b { font-weight: 600; display: block; margin-bottom: 2px; }
 .evidence .what span { color: var(--ash); font-size: 13px; }
 .evnote { margin-top: 24px; font-size: 13px; color: var(--ash); }
@@ -294,7 +296,7 @@ section.band { border-bottom: 1px solid var(--slate); padding: 112px 0; }
 
 /* closing */
 .closing { padding: 128px 0; text-align: center; border-bottom: 1px solid var(--slate); }
-.closing h2 { font-size: 64px; line-height: 1.02; margin: 0 0 32px; }
+.closing h2 { font-size: 64px; line-height: 1.02; margin: 20px 0 36px; }
 .closing .ctas { justify-content: center; }
 
 .sitefoot { padding: 48px 0 56px; color: var(--ash); font-size: 13px; }
@@ -353,6 +355,7 @@ section.band { border-bottom: 1px solid var(--slate); padding: 112px 0; }
 /* ---------- responsive ---------- */
 @media (max-width: 1080px) {
   .hero h1 { font-size: 68px; }
+  .hero h1 .line { white-space: normal; }
   .hero .wrap { grid-template-columns: 1fr; gap: 56px; align-items: start; }
   .receipt { max-width: 560px; }
   .uses { grid-template-columns: repeat(2, 1fr); }
@@ -397,7 +400,8 @@ section.band { border-bottom: 1px solid var(--slate); padding: 112px 0; }
   .facts dd { padding-top: 4px; }
   .notice { grid-template-columns: 1fr; }
   .hero { padding: 56px 0 64px; }
-  .hero h1 { font-size: 50px; line-height: 1.02; }
+  .hero h1 { font-size: 44px; line-height: 1.04; }
+  .receipt dd { font-size: 12px; }
   .hero .lede { font-size: 16px; }
   .ctas .btn { flex: 1 1 auto; }
   .quote { font-size: 28px; }
@@ -412,7 +416,8 @@ section.band { border-bottom: 1px solid var(--slate); padding: 112px 0; }
   .evidence td { border: 0; padding: 2px 0; text-align: left !important; }
   .evidence td.h::before { content: "Block "; color: var(--ash); }
   .receipt dt, .receipt dd { padding: 11px 14px; }
-  .sitefoot .wrap { grid-template-columns: 1fr; }
+  .sitefoot .wrap { grid-template-columns: 1fr 1fr; }
+  .sitefoot .wrap > :first-child { grid-column: 1 / -1; }
   .prose h1 { font-size: 38px; }
   .prose h2 { font-size: 26px; }
   .sitebar .wrap { height: 60px; }
