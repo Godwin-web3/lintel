@@ -294,3 +294,7 @@ mod params_tests {
         assert!(lintel::sealed::prove::setup_from_params::<{ lintel::sealed::CHUNKS }>(&b, &pin).is_err());
     }
 }
+
+mod v2;
+#[cfg(feature = "threads")]
+pub mod threads;
