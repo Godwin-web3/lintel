@@ -301,8 +301,10 @@ const routes = [
   ['POST', /^\/chain\/broadcast$/, async (_, body) => {
     need(isHex(body.tx) && body.tx.length <= 60000, 'tx must be hex (max 30,000 bytes)');
     const r = await lwd.sendTx(body.tx).catch(lwdErr);
-    // lightwalletd: error_code 0 and the txid (or nothing) as message on success
-    const accepted = r.error_code === 0 && (r.error_message === '' || /^[0-9a-f]{64}$/.test(r.error_message.trim()));
+    // lightwalletd: error_code 0 and the txid (or nothing) as message on
+    // success; the testnet server returns the txid JSON-quoted ("…").
+    const msg = r.error_message.trim().replace(/^"|"$/g, '');
+    const accepted = r.error_code === 0 && (msg === '' || /^[0-9a-f]{64}$/.test(msg));
     return { accepted, error_code: r.error_code, error_message: r.error_message };
   }],
 
