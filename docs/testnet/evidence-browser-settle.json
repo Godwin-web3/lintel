@@ -1,0 +1,55 @@
+{
+  "network": "testnet",
+  "driven_by": "browser UI (headless Chromium, two contexts)",
+  "price_taz": "0.02",
+  "started": "2026-10-20T15:48:00.518Z",
+  "seller_payout_address": "utest1xng873wlnj5qvv5nanw54tx7mxn2u7f230aze668sen75dtu78w9v3c9fxf056ru5qw0kjj85q6ka06vdm5z3ppjswjs9ddd3stvrmj4",
+  "listing_id": "aiypaQiAJTq6",
+  "buyer_balance_before": "0.0299 TAZ in 1 note(s)",
+  "decrypted_matches": true,
+  "escrow_address": "utest148dvycyvpksh2h40cyvcyvq0vvwtflffntgxgmuw239rc4mx4vmzyss7gmfdwruf3hkjwve30ukmm6j6435wsfdlqzhfvmxgn5q7aqqs",
+  "funding": {
+    "txid": "75053762c15aea7b27fad758928fc3009ca86d5ee3a10e35b17162914c302534",
+    "height": 4522583
+  },
+  "settlement": {
+    "txid": "c51697ebe0767395dee5fc54f246eccf53dc2e071f5690808ec77776939b2b67",
+    "height": 4522588,
+    "terms": {
+      "kind": "settle",
+      "pay_to": "utest1xng873wlnj5qvv5nanw54tx7mxn2u7f230aze668sen75dtu78w9v3c9fxf056ru5qw0kjj85q6ka06vdm5z3ppjswjs9ddd3stvrmj4",
+      "amount": 2000000,
+      "change_to": "utest1xae2gy0uc56l3m3mne7f26u8mqr6jcm2sn7a4cn0pw6dsggedk22cvycz0jqeqehx9nwuf8g5vw5cpe0pptf726l9d5m2r3g5yx0eyyd",
+      "target_height": 4522583,
+      "expiry_height": 4522639
+    }
+  },
+  "refund_presigned_before_funding": {
+    "lock_input": "75053762c15aea7b27fad758928fc3009ca86d5ee3a10e35b17162914c302534:0",
+    "lock_address": "tmQbnGQuWeRKWFav1kiPpBWG8T1BHd2bg4B",
+    "n_lock_time": 4522639,
+    "settle_expiry": 4522639,
+    "status": "kept on the buyer device; conflicts with the mined settlement (same escrow nullifier)"
+  },
+  "relay_saw": [
+    "escrow_address",
+    "funding_txid",
+    "merchant_address",
+    "merchant_contrib",
+    "payer_address",
+    "payer_contrib",
+    "payer_pok",
+    "refund_partial",
+    "refund_pczt",
+    "refund_r_a",
+    "refund_terms",
+    "settle_pczt",
+    "settle_r_a",
+    "settle_terms",
+    "settle_txid"
+  ],
+  "relay_saw_signature": false,
+  "t_source": "mined settlement transaction via relay GET /chain/tx/:txid, signature verified in the buyer browser (unlockFromTx)",
+  "finished": "2026-10-20T15:54:34.041Z",
+  "elapsed_s": 394
+}
