@@ -15,9 +15,11 @@
 //! for at most one signature: one response `s_b = r_i + c * sk_i` with a fresh
 //! uniform `r_i` hides `sk_i` perfectly, and with a single session per key there
 //! are no concurrent sessions for a ROS/Wagner attack to combine. The seller
-//! app enforces single use by marking a unit consumed on-device *before* it
-//! computes `s_b`, and storing the completion so a retry re-sends identical
-//! values (never a second response under the same nonce).
+//! app enforces single use by persisting the unit's `used = order` marker
+//! together with the completion on-device *before anything is released*, and
+//! a retry re-sends the stored completion byte-for-byte (never a second
+//! response under the same nonce). A completion that was computed but never
+//! persisted was never sent, so it reveals nothing.
 //!
 //! # Buyer (any time; seller may be offline)
 //! The buyer verifies `PoK_i` and `offer_i`, then pre-signs immediately:
@@ -42,7 +44,7 @@
 
 use blake2b_simd::Params;
 use ff::{Field, FromUniformBytes, PrimeField};
-use group::GroupEncoding;
+use group::{Group, GroupEncoding};
 use pasta_curves::pallas::{Base, Point, Scalar};
 use rand::rng;
 
@@ -90,6 +92,7 @@ impl UnitPublic {
     fn label(&self) -> [[u8; 32]; 2] { [self.r.to_bytes(), self.t.to_bytes()] }
     /// Seller knows `sk_i` for `vk_i`, bound to this unit's `R_i` and `T_i`.
     pub fn verify_pok(&self) -> bool {
+        if bool::from(self.vk.is_identity()) || bool::from(self.r.is_identity()) || bool::from(self.t.is_identity()) { return false; }
         let [r, t] = self.label();
         pok_verify(&self.pok, self.vk, &[b"unit", &r, &t])
     }
@@ -159,6 +162,10 @@ pub fn buyer_order(u: &UnitPublic, alpha: Scalar, sighash: &[u8]) -> Result<(Ord
 
 /// Anyone (seller, relay, tests) can check a buyer's order against public data.
 pub fn verify_order(u: &UnitPublic, o: &Order) -> bool {
+    // An identity DH point makes the pad public (anyone could unmask `s_b` and
+    // so compute `t_i` from the relay's view); an identity key share makes the
+    // buyer PoK vacuous. Neither comes from an honest buyer.
+    if bool::from(o.e.is_identity()) || bool::from(o.vk_a.is_identity()) || bool::from(o.r_a.is_identity()) { return false; }
     let l = buyer_label(u, &o.vk_a, &o.e);
     if !pok_verify(&o.pok, o.vk_a, &[b"buyer", &l[0], &l[1], &l[2], &l[3], &l[4]]) { return false; }
     let (_, _, c) = joint(u, o);
@@ -262,6 +269,11 @@ mod tests {
         let mut forged = u.clone(); forged.pok = u2.pok.clone();
         assert!(!forged.verify_pok());
         assert!(buyer_order(&forged, Scalar::ONE, b"h").is_err());
+        // Degenerate buyer points (identity DH point would make s_b public).
+        let mut bad = o.clone(); bad.e = Point::identity();
+        assert!(!verify_order(&u, &bad));
+        let mut bad = o.clone(); bad.vk_a = Point::identity();
+        assert!(!verify_order(&u, &bad));
         let mut done = seller_complete(sec, &o).unwrap();
         done.enc_sb += Scalar::ONE;
         assert!(buyer_extract(&keep, &u, &o, &done).is_err());
