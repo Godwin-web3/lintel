@@ -5,6 +5,12 @@
   "description": "Public-data relay for Lintel. Never sees keys, secrets or plaintext.",
   "type": "module",
   "main": "server.js",
-  "engines": { "node": ">=20" },
-  "scripts": { "start": "node server.js", "test": "node --test" }
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "license": "MIT OR Apache-2.0"
 }

@@ -1,0 +1,59 @@
+# Architecture
+
+Lintel has four parts. All cryptography runs on the user's device; the only server is a relay for public data.
+
+```mermaid
+flowchart LR
+  subgraph Seller device
+    SA[App + WASM engine]
+  end
+  subgraph Buyer device
+    BA[App + WASM engine]
+  end
+  R[(Relay<br/>public data only)]
+  L[lightwalletd<br/>Zcash testnet]
+  SA <-- listings, session fields --> R
+  BA <-- listings, session fields --> R
+  R <-- heights, trees, txs, broadcast --> L
+```
+
+## Components
+
+| Part | Path | What it does |
+| --- | --- | --- |
+| **Engine** | `engine/` | Rust crate `lintel`. `protocol.rs` (two-party adaptor signatures over Orchard's RedPallas spend-auth group), `disclosure.rs` (Halo 2 min-value disclosure), `sealed.rs` / `sealed_multi.rs` (verifiable encryption: proof that a ciphertext opens under `t` to content with hash `h`), `presale.rs` (multi-copy sales), `chain.rs` + `lwd.rs` (escrow, PCZT spends, refunds, lightwalletd client; `net` feature), `service.rs`. Binaries: `lintel-cli`, `lintel-chain`, `lintel-inject`. |
+| **WASM** | `wasm/` | Crate `lintel-wasm`, the engine compiled to WebAssembly for the browser: `Merchant` (seller) and `Payer` (buyer) for seal, verify, pre-sign, complete and unlock; `chain.rs` / `v2.rs` for in-browser escrow and settlement; `threads.rs` for optional multithreaded proving. |
+| **Relay** | `web/relay/` | Small Node server. Stores listings, write-once session fields and presale orders (Upstash Redis or a JSON file), and proxies public chain calls to lightwalletd. |
+| **App** | `web/app/` | React + Vite. Landing page at `/`, marketplace at `/app`, docs at `/docs`. Proving runs in a Web Worker. |
+
+## A single-copy sale, end to end
+
+1. **Seal.** The seller's browser picks a fresh `t`, encrypts the content, and proves (Halo 2) the ciphertext opens under `t` to content with hash `h`. It posts ciphertext, `T`, `h`, proof and price to the relay. `t` stays on the device.
+2. **Verify.** The buyer's browser downloads the listing and verifies the proof locally.
+3. **Set up the escrow.** Both browsers exchange key contributions with proofs of knowledge through the relay and derive the joint escrow address. The seller co-signs a time-locked refund for the buyer first.
+4. **Fund.** The buyer's wallet builds, proves and broadcasts the funding transaction through the relay's chain proxy.
+5. **Pre-sign.** The buyer sends an adaptor pre-signature on the settlement, locked to `T`.
+6. **Settle.** The seller completes the signature with `t`, finalizes the PCZT and broadcasts. The seller is paid.
+7. **Unlock.** The buyer fetches the mined settlement, extracts the completed spend-auth signature, computes `t` and decrypts. If step 6 never happens, the buyer broadcasts the refund once the lock height passes.
+
+## Relay API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/health` | Liveness |
+| GET, POST | `/listings`, `/listings/:id` | List, create and read listings |
+| POST | `/listings/:id/sessions` | Open a purchase session |
+| GET | `/sessions/:id` | Read session fields |
+| POST | `/sessions/:id/{partial,presig,signature,chain/:field}` | Write-once session fields |
+| POST, GET | `/listings/:id/units`, `/listings/:id/units/:i`, `/listings/:id/orders` | Presale copies and orders |
+| POST, GET | `/listings/:id/units/:i/orders`, `/orders/:id`, `/orders/:id/{complete,reject}` | Presale order lifecycle |
+| GET | `/chain/height`, `/chain/tree/:h`, `/chain/cmxs/:h`, `/chain/tx/:txid` | Public chain data |
+| POST | `/chain/broadcast` | Broadcast a fully signed transaction |
+
+## Performance (measured)
+
+- Proving parameters (`params.bin`) are 524,356 bytes and pinned by digest.
+- Sealing about 1 KB: about 28 s single-threaded, about 15 s with two threads (`LINTEL_THREADS=1` build). Verification is under a second.
+- Payload caps: 1,953 bytes per single proof, 7,905 bytes for a multi-proof presale copy.
+
+See [Presale, relay and proving](relay-perf.md) and [On-chain settlement](onchain.md) for full measurements.

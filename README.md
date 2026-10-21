@@ -1,105 +1,99 @@
-# Lintel
+<p align="center">
+  <img src="brand/logo/lintel-lockup-dark.svg#gh-dark-mode-only" alt="Lintel" width="220">
+  <img src="brand/logo/lintel-lockup-light.svg#gh-light-mode-only" alt="Lintel" width="220">
+</p>
 
-Conditional settlement on Zcash using two-party adaptor signatures.
+<h3 align="center">Pay to unlock. Proven before you pay.</h3>
 
-## Flow
+<p align="center">
+  Private, conditional settlement on Zcash. The transaction that pays the seller is the transaction that hands the buyer the key.
+</p>
 
-`R = R_a + R_b + T`, `rk = vk_a + vk_b + α·G`, `c = H(R ‖ rk ‖ sighash)`.
+<p align="center">
+  <a href="https://lintel-godwin-web3s-projects.vercel.app">App</a> ·
+  <a href="https://lintel-godwin-web3s-projects.vercel.app/docs">Docs</a> ·
+  <a href="docs/testnet-evidence.md">Testnet evidence</a> ·
+  <a href="SECURITY.md">Security</a>
+</p>
 
-1. Seller generates a single-use nonce and publishes only `R_a`.
-2. Buyer computes `s_b = r_b + c·sk_b` from `R_a` (never sees `r_a`).
-3. Seller checks the buyer's knowledge proof and `s_b·G == R_b + c·vk_b`, then sends `s_a`.
-4. Buyer recomputes `R = R_a + R_b + T`, checks `vk_hex` against `rk`, and verifies `s_a` before completing.
-5. Seller extracts `t = s − s_a − s_b` without learning `sk_b`. On chain, it reads `s` from the mined transaction.
+> **Testnet only, unaudited.** Don't use Lintel with real funds.
 
-## Sealed goods (pay to decrypt)
+## What it does
 
-`engine/src/sealed.rs` makes "paying reveals the key" mean "paying unlocks the promised content".
+A seller seals a file (a bug report, a dataset, research) in their browser and publishes a zero-knowledge proof that the ciphertext opens to content with a stated hash. A buyer verifies that proof on their own device, then pays into a shielded Zcash escrow. To claim the payment, the seller must complete an adaptor signature that publishes the decryption key on-chain. If the seller never claims, a refund the seller co-signed in advance becomes valid after a lock height.
 
-The party holding `t` (it completes the signature and gets paid) encrypts a payload and proves in Halo 2, before any money moves:
+- **Proven before you pay.** Halo 2 proof that the ciphertext decrypts, under the secret behind `T`, to content with hash `h`. No trusted setup.
+- **Atomic.** Two-party adaptor signatures over Orchard's spend-auth group: payment and key release are one transaction.
+- **Refundable.** v2 refunds are time-locked by consensus (`nLockTime`), so they can't race the seller's claim.
+- **Private by construction.** Keys, signing shares, `t` and plaintext never leave the device. Proving, signing and transaction building run in the browser (Rust → WebAssembly). The relay only passes public messages.
+- **Live on testnet.** Browser sale mined at heights 4,522,583 (funding) and 4,522,588 (settlement). See [evidence](docs/testnet-evidence.md).
 
-- `T = [t]·G` on the Orchard spend-auth base: the same `T` the adaptor signature is locked to.
-- `c_i = m_i + Poseidon(t, i+1)`: the ciphertext is the plaintext under a keystream from `t`.
-- `Poseidon(m) = h`: the plaintext matches a content hash the payer already agreed on.
+## How it works
 
-Public inputs: `[T.x, T.y, h, c_0..c_{N-1}]`. The payer runs `verify_offer` against the `T` from the session, then pre-signs. When the signature lands, it runs `extract_t` and `open` to decrypt.
-
-- Payload: up to 1,953 bytes per proof (64 chunks of 31 bytes, chunk 0 = length).
-- Larger payloads (`sealed_multi.rs`): up to 4 proofs bound to the same `t`, with a public keystream offset per part, 7,905 bytes, same pinned parameters.
-- Multi-copy, seller-offline sales (`presale.rs`): a fresh `t`, key share and pre-committed nonce per copy; see [docs/relay-perf.md](docs/relay-perf.md).
-- Proof: about 4.3 KB. Proving takes about 3.3 s on a laptop-class CPU, with no trusted setup (IPA).
-- `t` is sampled below the Pallas base modulus (`sealed::new_secret`) so it works both as a scalar and as a field element.
-- Limit: this proves the content matches `h`. The payer still has to know which `h` it wants, e.g. a hash published or attested out of band.
-
-```bash
-cargo run --release --bin lintel-cli -- sealed-demo "your secret payload"
-# {"offer_verified":true,"paid_ok":true,"decrypted_ok":true,"proof_bytes":4352,...}
+```mermaid
+sequenceDiagram
+  participant S as Seller (browser)
+  participant R as Relay (public data)
+  participant B as Buyer (browser)
+  participant Z as Zcash testnet
+  S->>R: ciphertext, T, h, Halo 2 proof
+  B->>R: fetch listing
+  B->>B: verify proof locally
+  S-->>B: co-signed time-locked refund (via relay)
+  B->>Z: fund joint escrow
+  B-->>S: adaptor pre-signature locked to T
+  S->>Z: settlement with completed signature
+  B->>Z: read signature, t = s − s_a − s_b, decrypt
 ```
 
-## On-chain settlement (Zcash testnet)
+Read more: [How it works](docs/how-it-works.md) · [Architecture](docs/architecture.md) · [Security model](docs/security-model.md).
 
-Full design and evidence: [docs/onchain.md](docs/onchain.md).
+## Quickstart
 
-The escrow is a real **Ironwood** note on testnet (NU7, v6 transactions). Its spend validating key is the two-party
-adaptor key, so `ak = vk_payer + vk_merchant`. The signatures sign the real PCZT sighash with the PCZT's `alpha`.
-The payer recovers `t` from the mined transaction, and a refund is co-signed before the escrow is funded.
+Use the hosted app: <https://lintel-godwin-web3s-projects.vercel.app>. Get testnet TAZ from a faucet and follow the [Quickstart](docs/quickstart.md).
 
-| Testnet | txid | Height |
-| --- | --- | --- |
-| Sale 1 funding → escrow | `da340dee5bb4a8ec11872d184c884b38aabfba3060a68e76d17df32628d6cf91` | 4,521,270 |
-| Sale 1 adaptor-signed settlement (t extracted from chain, content decrypted) | `8b4ada0992642b2a71649e08c8de8d0b00cdf90a46a2794d4e09ca7999a3c0a8` | 4,521,277 |
-| Sale 2 funding → escrow | `f11c111d89e870b69ade0478f7331f0e8131bac7c596846a8327832a16a235e4` | 4,521,282 |
-| Sale 2 refund (pre-signed before funding, payer alone) | `633ac619a5305b961d0d3187f26cc61f6b9211a49b3bb787a30d044aee6a3f03` | 4,521,289 |
-| Browser sale funding → escrow (both sides in the web app) | `75053762c15aea7b27fad758928fc3009ca86d5ee3a10e35b17162914c302534` | 4,522,583 |
-| Browser sale settlement (buyer's browser extracted t from chain, decrypted) | `c51697ebe0767395dee5fc54f246eccf53dc2e071f5690808ec77776939b2b67` | 4,522,588 |
+Run it locally:
 
-```bash
-cd engine
-cargo test --release --features chain --test settlement      # offline: fund, refund, settle, prove, verify, extract t
-cargo build --release --features net --bin lintel-chain --example testnet_sale
+```sh
+# engine tests and demos
+cd engine && cargo test --release
+cargo run --release --bin lintel-cli -- sealed-demo
+
+# relay
+cd web/relay && node server.js            # http://localhost:8787
+
+# app
+cd web/app && npm ci && VITE_RELAY_URL=http://localhost:8787 npm run dev
 ```
 
-## Web app
+Self-host the relay (Render + Upstash) and app (Vercel): [docs/self-hosting.md](docs/self-hosting.md). CLI reference: [docs/cli.md](docs/cli.md).
 
-`web/` is a browser marketplace for sealed goods: sell, verify, buy, unlock.
-The engine runs in the browser through `wasm/` (`lintel-wasm`), so signing
-shares, the unlock secret and plaintext never leave the user's device; a small
-relay (`web/relay`) carries only public data. See [web/README.md](web/README.md).
+## Repository
 
-## Reproduce
+| Path | What |
+| --- | --- |
+| [`engine/`](engine) | Rust crate: adaptor signatures, Halo 2 circuits, sealed goods, presale, chain, CLIs |
+| [`wasm/`](wasm) | The engine for the browser |
+| [`web/relay/`](web/relay) | Public-data relay and chain proxy (Node) |
+| [`web/app/`](web/app) | Landing page, marketplace and docs (React + Vite) |
+| [`docs/`](docs) | Documentation |
+| [`brand/`](brand) | Brand kit |
 
-```bash
-cd engine
-cargo test --lib protocol::tests
-cargo test --lib disclosure::tests
-cargo test --release --lib sealed::tests
-cargo run --bin lintel-cli -- demo
-```
+## Status and limits
 
-## What is verified
+Working on testnet today: single-copy listings with on-chain escrow, settlement and time-locked refund; multi-copy presale listings (settled off-chain for now); payloads up to 7,905 bytes; optional multithreaded proving.
 
-- Nonce is generated inside the seller and consumed on use.
-- Buyer computes its partial from `R_a` alone.
-- `verify_presig` recomputes `R` and checks `vk_hex` against `rk`.
-- Seller proves knowledge of `sk_a`; proofs use a separate domain.
-- Completed signature verifies under `rk`.
-- Seller extracts `t` without `sk_b`.
-- MinValue circuit: `C = Poseidon(value, blind, txid_lo, txid_hi)` computed in-circuit; public inputs `[min, txid_lo, txid_hi, C]`; running sum starts from a fixed constant 0, 64-bit range check on `value - min`.
-- Real Halo 2 prove/verify (IPA over Pasta) in `disclosure::prove`.
-- Sealed goods: wrong content hash, tampered ciphertext, and a key not bound to `T` all fail; the end-to-end test pays, extracts `t`, and decrypts.
-- Peer-supplied hex is parsed with `parse_scalar`/`parse_point`; malformed input returns an error, never panics.
+Not yet: mainnet, an audit, on-chain presale settlement, a background agent so sellers needn't stay online, and a full wallet. Details in the [security model](docs/security-model.md#known-limits).
 
-## Not yet done
+## Contributing
 
-- **Browser on-chain flow covers single-copy listings only.** Multi-copy presale listings still settle off-chain
-  (no ZEC moves).
-- **The seller must be online** when a buyer starts an on-chain purchase: the seller's open app co-signs the
-  refund before the buyer funds, and later broadcasts the settlement. There is no background seller agent for
-  on-chain sales.
-- **The device wallet is minimal:** it knows only notes scanned in by txid, marks a note spent only when this
-  device funds an escrow with it, and does not detect spends made elsewhere or pick up change/payout/refund notes
-  automatically. The signed refund lives only in that browser's localStorage.
-- **Production build of the on-chain engine is unverified.** `web/app/build.sh` needs a wasm32-capable clang for
-  `secp256k1-sys`; if that build fails the app ships a stub and the on-chain panels report the engine as
-  unavailable.
-- Testnet only. Details: [docs/onchain.md](docs/onchain.md#remaining-gaps).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately per [SECURITY.md](SECURITY.md).
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. Unless you explicitly state otherwise, any contribution you submit for inclusion is dual licensed as above, without additional terms. Brand fonts are under the SIL Open Font License.
