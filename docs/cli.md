@@ -30,6 +30,7 @@ Needs the `net` feature: `cargo run --release --features net --bin lintel-chain 
 | `finalize --pczt in.pczt --note note.json --index I --out tx.hex` | Add the witness, prove and verify |
 | `broadcast --tx tx.hex` | Broadcast |
 | `fetch-sig --txid X --r H --rk H --sighash H` | Extract the completed spend-auth signature from a mined tx |
+| `verify-witness --txid X` | Diagnostic, no keys: rebuild the witness of every Ironwood output of a mined tx and check it against the chain's tree root |
 
 `engine/examples/testnet_sale.rs` (`--features net`) runs the whole on-chain sale and refund. See [On-chain settlement](onchain.md).
 
