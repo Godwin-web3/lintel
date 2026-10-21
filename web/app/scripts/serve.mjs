@@ -11,7 +11,7 @@ const cfg = JSON.parse(fs.readFileSync(new URL('../vercel.json', import.meta.url
 const args = process.argv.slice(2);
 const port = Number(args.find((a) => /^\d+$/.test(a)) || 4173);
 const relay = args.includes('--relay') ? args[args.indexOf('--relay') + 1] : process.env.SERVE_RELAY || null;
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm', '.css': 'text/css', '.bin': 'application/octet-stream', '.json': 'application/json', '.svg': 'image/svg+xml' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm', '.css': 'text/css', '.bin': 'application/octet-stream', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.pdf': 'application/pdf' };
 
 export function headersFor(urlPath) {
   const out = {};
@@ -28,6 +28,8 @@ export const server = http.createServer((req, res) => {
   let p = path.normalize(path.join(root, decodeURIComponent(u.pathname)));
   if (!p.startsWith(root)) { res.writeHead(403); return res.end(); }
   if (fs.existsSync(p) && fs.statSync(p).isDirectory()) p = path.join(p, 'index.html');
+  // SPA fallback, like the vercel.json rewrite: /, /app, /docs/... all serve index.html.
+  if (!fs.existsSync(p) && !path.extname(p)) p = path.join(root, 'index.html');
   if (!fs.existsSync(p)) { res.writeHead(404); return res.end('not found'); }
   res.writeHead(200, { 'Content-Type': types[path.extname(p)] || 'application/octet-stream', ...headersFor(u.pathname) });
   fs.createReadStream(p).pipe(res);

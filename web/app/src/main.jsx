@@ -1,4 +1,8 @@
 import { createRoot } from 'react-dom/client';
-import App from './App.jsx';
+import { legacyRedirect } from './site.jsx';
+import Root from './Root.jsx';
+import './tokens.css';
 import './styles.css';
-createRoot(document.getElementById('root')).render(<App />);
+
+legacyRedirect(); // /#/listing/x (old links) -> /app#/listing/x, before the first render
+createRoot(document.getElementById('root')).render(<Root />);

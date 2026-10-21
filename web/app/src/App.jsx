@@ -4,6 +4,7 @@ import { sellV2, startSellerAgent, MAX_COPIES } from './presale.js';
 import { ListingV2, SellerCardV2, Purchases, copiesLabel } from './Presale.jsx';
 import { WalletPanel, OnchainBuy } from './Onchain.jsx';
 import { advanceSeller } from './onchain.js';
+import { Link, Lockup, NotFound, useTitle } from './site.jsx';
 
 // ---------- tiny hash router ----------
 function useRoute() {
@@ -20,13 +21,14 @@ const go = (p) => (location.hash = p);
 // ---------- shared bits ----------
 const short = (h) => (h ? `${h.slice(0, 10)}…${h.slice(-6)}` : '');
 const fmtBytes = (n) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`);
+export const Amt = ({ v, unit = 'ZEC', big }) => <span className={`amt${big ? ' big' : ''}`}>{v}<span className="unit">{unit}</span></span>;
 
 function Steps({ steps }) {
   return (
     <ol className="steps">
       {steps.map(([label, state, note], i) => (
-        <li key={i} className={state}>
-          <span className="dot">{state === 'done' ? '✓' : state === 'fail' ? '!' : i + 1}</span>
+        <li key={i} className={state} aria-current={state === 'run' ? 'step' : undefined}>
+          <span className="dot" aria-hidden="true">{state === 'done' ? '✓' : state === 'fail' ? '!' : i + 1}</span>
           <div>
             <b>{label}</b>
             {note && <small>{note}</small>}
@@ -39,11 +41,14 @@ function Steps({ steps }) {
 
 function Notice() {
   return (
-    <div className="notice">
-      <b>Experimental.</b> Proofs, adaptor signatures and decryption are real and run on your device.
-      Multi-copy listings still settle off-chain (the completed signature goes through the relay; no ZEC moves).
-      Single-copy listings can settle <b>on Zcash testnet</b>: escrow, time-locked refund and an adaptor-signed
-      settlement built, proven and checked in your browser, with the key taken from the mined transaction.
+    <div className="notice" role="note">
+      <span className="label">Testnet</span>
+      <div>
+        Proofs, adaptor signatures and decryption are real and run on this device. <b>Single-copy listings</b> can
+        settle on Zcash testnet: escrow, time-locked refund and settlement are built, proven and checked in your
+        browser, and the key is read from the mined transaction. <b>Multi-copy listings</b> still settle
+        off-chain: the completed signature goes through the relay and no ZEC moves.
+      </div>
     </div>
   );
 }
@@ -70,30 +75,35 @@ export default function App() {
   else if (route[0] === 'listing' && route[1]) page = <Listing id={route[1]} boot={boot} />;
   else if (route[0] === 'mine') page = <Mine boot={boot} agent={agent} />;
   else if (route[0] === 'wallet') page = <WalletPanel boot={boot} />;
-  else page = <Market />;
+  else if (!route[0]) page = <Market />;
+  else page = <NotFound inApp />;
 
+  const tab = route[0] || '';
+  const navItem = (href, key, label) => (
+    <a href={href} className={tab === key ? 'on' : ''} aria-current={tab === key ? 'page' : undefined}>{label}</a>
+  );
   return (
     <div className="shell">
-      <header>
-        <a className="brand" href="#/">
-          <span className="logo">◆</span> Lintel
-        </a>
-        <nav>
-          <a href="#/" className={!route[0] ? 'on' : ''}>Market</a>
-          <a href="#/sell" className={route[0] === 'sell' ? 'on' : ''}>Sell</a>
-          <a href="#/mine" className={route[0] === 'mine' ? 'on' : ''}>My sales</a>
-          <a href="#/wallet" className={route[0] === 'wallet' ? 'on' : ''}>Wallet</a>
+      <a className="skip" href="#content">Skip to content</a>
+      <header className="appbar">
+        <Link to="/" className="brandlink" aria-label="Lintel home"><Lockup /></Link>
+        <nav className="appnav" aria-label="Marketplace">
+          {navItem('#/', '', 'Market')}
+          {navItem('#/sell', 'sell', 'Sell')}
+          {navItem('#/mine', 'mine', 'My sales')}
+          {navItem('#/wallet', 'wallet', 'Wallet')}
+          <Link to="/docs">Docs</Link>
         </nav>
-        <span className={`engine ${boot.state}`} title={boot.error || ''}>
-          {boot.state === 'loading' && 'Loading prover…'}
-          {boot.state === 'ready' && `Prover ready · ${(boot.ms / 1000).toFixed(1)}s · ${boot.threads > 1 ? `${boot.threads} threads` : '1 thread'}`}
+        <span className={`engine chip ${boot.state}`} title={boot.error || ''} role="status">
+          {boot.state === 'loading' && 'Loading prover'}
+          {boot.state === 'ready' && <>Prover ready · <span className="mono">{(boot.ms / 1000).toFixed(1)}s</span> · {boot.threads > 1 ? `${boot.threads} threads` : '1 thread'}</>}
           {boot.state === 'error' && 'Prover failed to load'}
         </span>
       </header>
-      <main>{page}</main>
-      <footer>
-        Keys, the unlock secret and plaintext never leave this browser. The relay at <code>{RELAY}</code> only
-        sees public data.
+      <main id="content">{page}</main>
+      <footer className="appfoot">
+        <span>Key shares, the unlock secret and plaintext never leave this browser. The relay at <code>{RELAY}</code> sees public data only.</span>
+        <nav aria-label="Footer"><Link to="/">About</Link><Link to="/docs/security-model">Security model</Link><a href="https://github.com/Godwin-web3/lintel" rel="noreferrer">GitHub</a></nav>
       </footer>
     </div>
   );
@@ -106,32 +116,35 @@ function Market() {
   useEffect(() => {
     relay('GET', '/listings').then((r) => setRows(r.listings)).catch((e) => setErr(e.message));
   }, []);
+  useTitle('Marketplace · Lintel');
   return (
     <section>
-      <div className="hero">
-        <h1>Pay to decrypt, privately.</h1>
-        <p>
-          Sell a secret, a report or a file. Buyers verify a zero-knowledge proof that the sealed content is
-          exactly what you committed to, and the payment signature itself hands them the key. No escrow, no
-          trusted middleman.
-        </p>
-        <a className="btn" href="#/sell">Sell something</a>
+      <div className="pagehead">
+        <div>
+          <div className="label">Marketplace · Zcash testnet</div>
+          <h1>Sealed goods, <em className="key">proven</em> before you pay.</h1>
+          <p>
+            Each listing carries a zero-knowledge proof that its ciphertext opens to content with the stated hash.
+            Your browser checks it before you buy, and the payment signature hands you the key.
+          </p>
+        </div>
+        <a className="btn ghost" href="#/sell">Sell something</a>
       </div>
       <Notice />
       <h2>Open listings</h2>
-      {err && <p className="error">{err}</p>}
-      {!rows && !err && <p className="muted">Loading…</p>}
-      {rows && rows.length === 0 && <p className="muted">Nothing listed yet.</p>}
+      {err && <p className="error" role="alert">Could not reach the relay: {err}</p>}
+      {!rows && !err && <p className="muted">Loading listings…</p>}
+      {rows && rows.length === 0 && <div className="empty">Nothing listed yet. <a href="#/sell">List the first one</a>.</div>}
       <div className="grid">
         {rows?.map((l) => (
           <a key={l.id} className={`card ${l.status}`} href={`#/listing/${l.id}`}>
-            <div className="row">
+            <div className="row title-row">
               <b>{l.title}</b>
-              <span className="price">{l.price_zec} ZEC</span>
+              <Amt v={l.price_zec} />
             </div>
-            <p>{l.description || <i className="muted">No description</i>}</p>
-            <div className="row muted small">
-              <span>{fmtBytes(l.size)} sealed{copiesLabel(l) ? ` · ${copiesLabel(l)}` : ''}</span>
+            <p>{l.description || <span className="muted">No description</span>}</p>
+            <div className="meta">
+              <span className="mono">{fmtBytes(l.size)} sealed{copiesLabel(l) ? ` · ${copiesLabel(l)}` : ''}</span>
               <span className={`tag ${l.status}`}>{l.status}</span>
             </div>
           </a>
@@ -207,35 +220,37 @@ function Sell({ boot }) {
   }
 
   const busy = steps && steps.some((x) => x[1] === 'run');
+  useTitle('Sell · Lintel');
   return (
     <section className="narrow">
-      <h1>Sell sealed content</h1>
-      <p className="muted">
-        Your content is encrypted in this browser. Each copy gets its own secret, so one sale never unlocks
-        another. Buyers can purchase while you are offline; your browser completes their sales the next time
-        this app is open on this device.
+      <div className="label">Sell</div>
+      <h1>Seal something to sell.</h1>
+      <p className="lede">
+        The content is encrypted in this browser and never leaves it in the clear. Each copy gets its own secret,
+        so one sale never unlocks another. Buyers can order while you are offline; their sales complete the next
+        time this app is open on this device.
       </p>
       <form onSubmit={submit} className="form">
-        <label>Title<input required maxLength={120} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Critical bug report: Acme vault" /></label>
-        <label>Public description<textarea maxLength={2000} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What the buyer gets, without giving it away" /></label>
-        <label>Price (ZEC)<input required inputMode="decimal" pattern="\d{1,8}(\.\d{1,8})?" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0.5" /></label>
-        <label className="check"><input type="checkbox" checked={form.onchain} onChange={(e) => setForm({ ...form, onchain: e.target.checked })} /> Settle on Zcash testnet (single copy, price in TAZ, up to {fmtBytes(boot.maxPayload || 1953)}; keep My sales open while a buyer pays)</label>
-        {!form.onchain && <label>Copies for sale<input type="number" min={1} max={MAX_COPIES} value={form.copies} onChange={(e) => setForm({ ...form, copies: e.target.value })} /></label>}
-        <label>Secret content
+        <label><span className="label">Title</span><input required maxLength={120} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Critical bug report: Acme vault" /></label>
+        <label><span className="label">Public description</span><textarea maxLength={2000} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What the buyer gets, without giving it away" /></label>
+        <label><span className="label">Price ({form.onchain ? 'TAZ' : 'ZEC'})</span><input className="mono" required inputMode="decimal" pattern="\d{1,8}(\.\d{1,8})?" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0.5" /></label>
+        <label className="check"><input type="checkbox" checked={form.onchain} onChange={(e) => setForm({ ...form, onchain: e.target.checked })} /> <span><b>Settle on Zcash testnet.</b> One copy, priced in TAZ, up to {fmtBytes(boot.maxPayload || 1953)}. Keep My sales open while a buyer pays: your app co-signs their refund and broadcasts the settlement.</span></label>
+        {!form.onchain && <label><span className="label">Copies for sale</span><input className="mono" type="number" min={1} max={MAX_COPIES} value={form.copies} onChange={(e) => setForm({ ...form, copies: e.target.value })} /></label>}
+        <label><span className="label">Secret content</span>
           <textarea className="mono" rows={6} disabled={!!file} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Paste the secret text here, or attach a small file below" />
         </label>
-        <label className="file">Or attach a file<input type="file" onChange={(e) => setFile(e.target.files[0] || null)} /></label>
-        <div className={`row small ${size > max ? 'error' : 'muted'}`}>
-          <span>{fmtBytes(size)} of {fmtBytes(max)} per listing</span>
-          <span>Filename is public if you attach one</span>
+        <label className="file"><span className="label">Or attach a file</span><input type="file" onChange={(e) => setFile(e.target.files[0] || null)} /></label>
+        <div className={`meter ${size > max ? 'error' : 'muted'}`}>
+          <span className="mono">{fmtBytes(size)} / {fmtBytes(max)}</span>
+          <span>The filename is public if you attach a file.</span>
         </div>
         <button className="btn" disabled={busy || boot.state !== 'ready' || size === 0 || size > max}>
-          {boot.state !== 'ready' ? 'Waiting for prover…' : busy ? 'Working…' : 'Seal and list'}
+          {boot.state !== 'ready' ? 'Waiting for the prover…' : busy ? 'Sealing…' : 'Seal and list'}
         </button>
       </form>
       {steps && <Steps steps={steps} />}
-      {busy && steps[0][1] === 'run' && <p className="muted small">Each copy needs its own proof (more for files over 1.9 KB). Keep this tab open until listing finishes.</p>}
-      {err && <p className="error">{err}</p>}
+      {busy && steps[0][1] === 'run' && <p className="muted small">Each copy needs its own proof, and files over 1.9 KB need more than one. Keep this tab open until listing finishes.</p>}
+      {err && <p className="error" role="alert">{err}</p>}
     </section>
   );
 }
@@ -292,28 +307,35 @@ function Mine({ boot, agent = {} }) {
   };
 
   const ids = Object.keys(mine);
+  useTitle('My sales · Lintel');
   return (
     <section>
-      <h1>My sales</h1>
-      <p className="muted">
-        Multi-copy listings complete automatically whenever this app is open on this device, on any page. Buyers
-        do not wait for you: they pre-sign immediately, and your next visit releases their keys. Older
-        single-copy listings still need this page open while a buyer is purchasing.
-      </p>
+      <div className="pagehead">
+        <div>
+          <div className="label">Seller</div>
+          <h1>My sales</h1>
+          <p>
+            Multi-copy listings complete on their own whenever this app is open on this device, on any app page.
+            Buyers pre-sign right away; your next visit releases their keys. Single-copy and on-chain listings need
+            this page open while a buyer is paying.
+          </p>
+        </div>
+      </div>
       <Notice />
-      {ids.length === 0 && <p className="muted">No listings on this device. <a href="#/sell">Sell something</a>.</p>}
+      {ids.length === 0 && <div className="empty">No listings on this device. <a href="#/sell">Seal something to sell</a>.</div>}
       <div className="grid">
         {ids.map((id) => {
           if (mine[id].v === 2) return <SellerCardV2 key={id} id={id} entry={mine[id]} agent={agent[id]} onForget={forget} boot={boot} />;
           const l = live[id];
           const sess = l?.session;
-          const stage = sess?.mode === 'chain' ? (sess.chain?.settle_txid ? 'Settled on chain' : 'On-chain sale in progress') : !sess ? 'Waiting for a buyer' : !sess.partial ? 'Buyer joined' : !sess.presig ? 'Waiting for buyer pre-signature' : !sess.signature ? 'Completing' : 'Sold';
+          const stage = sess?.mode === 'chain' ? (sess.chain?.settle_txid ? 'Settled on chain' : 'On-chain sale in progress') : !sess ? 'Waiting for a buyer' : !sess.partial ? 'Buyer joined' : !sess.presig ? 'Waiting for the buyer’s pre-signature' : !sess.signature ? 'Completing' : 'Sold';
+          const tone = !l ? '' : l.error ? 'error' : stage === 'Sold' || stage === 'Settled on chain' ? 'ok' : sess ? 'pending' : '';
           return (
             <div key={id} className="card">
-              <div className="row"><b>{mine[id].title}</b>{l?.listing && <span className="price">{l.listing.price_zec} ZEC</span>}</div>
-              {l?.error ? <p className="error">{l.error}</p> : <p>{l ? stage : 'Checking…'}</p>}
+              <div className="row title-row"><b>{mine[id].title}</b>{l?.listing && <Amt v={l.listing.price_zec} unit={mine[id].onchain ? 'TAZ' : 'ZEC'} />}</div>
+              {l?.error ? <p className="error">{l.error}</p> : <p><span className={`chip ${tone}`}>{l ? stage : 'Checking'}</span></p>}
               {l?.note && <p className="small muted">{l.note}</p>}
-              <div className="row small">
+              <div className="actions">
                 <a href={`#/listing/${id}`}>View listing</a>
                 <button className="link danger" onClick={() => forget(id)}>Forget keys</button>
               </div>
@@ -333,6 +355,7 @@ function Listing({ id, boot }) {
   const [err, setErr] = useState('');
   const [result, setResult] = useState(null);
   const isMine = !!store.get().selling[id];
+  useTitle(data ? `${data.listing.title} · Lintel` : 'Listing · Lintel');
 
   useEffect(() => { relay('GET', `/listings/${id}`).then(setData).catch((e) => setErr(e.message)); }, [id]);
 
@@ -398,8 +421,8 @@ function Listing({ id, boot }) {
     a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  if (err && !data) return <section className="narrow"><p className="error">{err}</p></section>;
-  if (!data) return <section className="narrow"><p className="muted">Loading…</p></section>;
+  if (err && !data) return <section className="narrow"><a href="#/" className="back">← Market</a><p className="error" role="alert">{err}</p></section>;
+  if (!data) return <section className="narrow"><p className="muted">Loading the listing…</p></section>;
   if (data.listing.version === 2) {
     return <ListingV2 data={data} boot={boot} Steps={Steps} Notice={Notice} reload={() => relay('GET', `/listings/${id}`).then(setData).catch(() => {})} />;
   }
@@ -414,39 +437,42 @@ function Listing({ id, boot }) {
 
   return (
     <section className="narrow">
-      <a href="#/" className="small">← Market</a>
-      <div className="row"><h1>{L.title}</h1><span className="price big">{L.price_zec} ZEC</span></div>
-      {L.description && <p>{L.description}</p>}
+      <a href="#/" className="back">← Market</a>
+      <div className="row title-row"><h1>{L.title}</h1><Amt v={L.price_zec} big /></div>
+      {L.description && <p className="lede">{L.description}</p>}
       <dl className="facts">
-        <dt>Sealed size</dt><dd>{fmtBytes(L.size)}{L.filename ? ` · ${L.filename}` : ''}</dd>
-        <dt>Content hash</dt><dd className="mono">{short(L.content_hash)}</dd>
-        <dt>Unlock point T</dt><dd className="mono">{short(L.t_point)}</dd>
+        <dt>Sealed size</dt><dd className="mono">{fmtBytes(L.size)}{L.filename ? ` · ${L.filename}` : ''}</dd>
+        <dt>Content hash</dt><dd className="mono" title={L.content_hash}>{short(L.content_hash)}</dd>
+        <dt>Unlock point T</dt><dd className="mono" title={L.t_point}>{short(L.t_point)}</dd>
         <dt>Status</dt><dd><span className={`tag ${L.status}`}>{L.status}</span></dd>
       </dl>
 
-      <div className={`proof ${verify.state}`}>
-        {verify.state === 'idle' && 'Waiting for prover…'}
-        {verify.state === 'run' && 'Verifying Halo 2 proof on this device…'}
-        {verify.state === 'ok' && <>✓ Proof verified in {verify.ms} ms: the ciphertext decrypts, under the secret behind T, to content with this exact hash.</>}
-        {verify.state === 'bad' && <>✗ Proof rejected: {verify.error}. Do not buy.</>}
+      <div className={`proof ${verify.state}`} role="status">
+        <div>
+          {verify.state === 'idle' && 'Waiting for the prover…'}
+          {verify.state === 'run' && 'Verifying the Halo 2 proof on this device…'}
+          {verify.state === 'ok' && <><b>Proof verified</b> in <span className="mono">{verify.ms} ms</span>. The file matches the listing: under the secret behind T, the ciphertext decrypts to content with this exact hash.</>}
+          {verify.state === 'bad' && <><b>Proof rejected:</b> {verify.error}. Do not buy.</>}
+        </div>
       </div>
 
       <Notice />
       {isMine && <p className="muted">This is your listing. Keep <a href="#/mine">My sales</a> open to serve buyers.</p>}
-      {canBuy && <button className="btn ghost" onClick={buy}>Buy off-chain demo (no ZEC moves)</button>}
+      {canBuy && <div className="actionbar"><button className="btn ghost" onClick={buy}>Buy off-chain demo (no ZEC moves)</button></div>}
       {!isMine && !steps && verify.state === 'ok' && (L.status === 'open' || chainActive) && !result && (
         <OnchainBuy listing={L} verifiedT={verify.t} boot={boot} onDone={onchainDone} />
       )}
       {L.status !== 'open' && !steps && !isMine && !chainActive && <p className="muted">This listing already has a buyer.</p>}
       {steps && <Steps steps={steps} />}
       {steps && !result && !err && <p className="muted small">Keep this tab open until the content unlocks.</p>}
-      {err && <p className="error">{err}</p>}
+      {err && <p className="error" role="alert">{err}</p>}
 
       {result && (
         <div className="unlocked">
+          <div className="label ok-text">Settled · decrypted on this device</div>
           <h2>Unlocked</h2>
-          {result.text !== null ? <pre>{result.text}</pre> : <p className="muted">Binary file, {fmtBytes(result.bytes.length)}.</p>}
-          <button className="btn" onClick={download}>Download</button>
+          {result.text !== null ? <pre>{result.text}</pre> : <p className="muted">Binary file, <span className="mono">{fmtBytes(result.bytes.length)}</span>.</p>}
+          <button className="btn ghost" onClick={download}>Download</button>
         </div>
       )}
     </section>
