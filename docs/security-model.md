@@ -49,6 +49,7 @@ Chain data goes through a lightwalletd proxy (`LINTEL_LWD`, default `testnet.zec
 - **Minimal wallet.** The built-in testnet wallet doesn't track spent notes or change across sessions.
 - **Refund state is local.** The signed refund exists only in the buyer's browser storage.
 - **Relay privacy.** As above, the relay operator can view escrows.
+- **Big-offer blobs live on the relay.** A relay that loses or withholds a blob stalls a sale before payment (the buyer cannot verify, so does not pay); a swapped or tampered blob is rejected by its SHA-256 name and by the proofs. Blob uploads are open (size- and quota-capped) and not garbage-collected yet.
 
 ## Reporting a vulnerability
 

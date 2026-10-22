@@ -13,3 +13,4 @@ pub mod agent;
 pub mod lwd;
 pub mod sealed_multi;
 pub mod presale;
+pub mod sealed_big;

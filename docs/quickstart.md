@@ -26,7 +26,7 @@ Open the app: <https://lintel-godwin-web3s-projects.vercel.app/app>. The first l
 
 1. In the seller's browser, open **Sell**.
 2. Enter a title, a public description and a price.
-3. Tick **Settle on Zcash testnet** for an on-chain sale. On-chain listings are single copy and hold up to 1,953 bytes.
+3. Tick **Settle on Zcash testnet** for an on-chain sale. On-chain listings are single copy. Any listing holds up to about 1.5 MB; files over 1,953 bytes (on-chain) or 7,905 bytes (multi-copy) are proven in 23.8 KB parts, each taking roughly 100 s in a single-threaded browser tab ([big payloads](big-payloads.md)).
 4. Paste the secret text or attach a small file, then choose **Seal and list**. Sealing produces a Halo 2 proof on your device; it takes roughly 15 to 30 seconds on a laptop.
 5. Open **My sales** and leave it open. For an on-chain sale, the seller's app has to co-sign the buyer's refund before the buyer funds, and broadcast the settlement afterwards.
 

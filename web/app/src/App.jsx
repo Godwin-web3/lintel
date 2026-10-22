@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { crypto, relay, store, randomHex, randomAlpha, sleep, RELAY } from './api.js';
-import { sellV2, startSellerAgent, MAX_COPIES } from './presale.js';
+import { crypto, relay, store, randomHex, randomAlpha, sleep, RELAY, putBlobs, resolveOffer } from './api.js';
+import { sellV2, startSellerAgent, MAX_COPIES, V2_MAX } from './presale.js';
 import { ListingV2, SellerCardV2, Purchases, copiesLabel } from './Presale.jsx';
 import { WalletPanel, OnchainBuy } from './Onchain.jsx';
 import { advanceSeller, wallet } from './onchain.js';
@@ -20,7 +20,7 @@ const go = (p) => (location.hash = p);
 
 // ---------- shared bits ----------
 const short = (h) => (h ? `${h.slice(0, 10)}…${h.slice(-6)}` : '');
-const fmtBytes = (n) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`);
+const fmtBytes = (n) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(2)} MB`);
 export const Amt = ({ v, unit = 'ZEC', big }) => <span className={`amt${big ? ' big' : ''}`}>{v}<span className="unit">{unit}</span></span>;
 
 function Steps({ steps }) {
@@ -161,10 +161,15 @@ function Sell({ boot }) {
   const [file, setFile] = useState(null);
   const [steps, setSteps] = useState(null);
   const [err, setErr] = useState('');
-  const max = boot.maxPayloadV2 || 7905;
+  // Every byte's decryption is proven at any size: up to 7,905 bytes in small
+  // proofs (offer v2/v1), above that in 23,808-byte parts at k = 15 (offer v3).
+  const max = boot.maxPayloadBig || boot.maxPayloadV2 || 7905;
+  const partBytes = boot.bigPartBytes || 23808;
 
   const payloadBytes = async () => (file ? new Uint8Array(await file.arrayBuffer()) : new TextEncoder().encode(form.text));
   const size = file ? file.size : new TextEncoder().encode(form.text).length;
+  const bigParts = size > (form.onchain ? (boot.maxPayload || 1953) : V2_MAX) ? Math.ceil((Math.ceil(size / 31) + 1) / (partBytes / 31)) : 0;
+  const partMsg = (p) => (p.uploaded !== undefined ? `uploading proven parts ${p.uploaded}/${p.blobs}` : p.part === 0 ? `building big-payload keys, then ${p.parts} proofs` : `part ${p.part}/${p.parts} proven (${(p.ms / 1000).toFixed(0)}s)`);
 
   async function submit(e) {
     e.preventDefault();
@@ -180,6 +185,7 @@ function Sell({ boot }) {
       await sellV2({
         payload, copies,
         meta: { title: form.title.trim(), description: form.description.trim(), price_zec: form.price.trim(), filename: file?.name },
+        onPart: (i, n, p) => { s[0][2] = `copy ${i}/${n}: ${partMsg(p)}`; setSteps(s.map((x) => [...x])); },
         onStep: (i, n, ms) => {
           s[0][2] = `copy ${i}/${n} sealed in ${(ms / 1000).toFixed(1)}s`;
           s[1][1] = 'run'; setSteps(s.map((x) => [...x]));
@@ -197,13 +203,19 @@ function Sell({ boot }) {
 
   // Single copy, settled on Zcash testnet (v1 listing; the buyer funds an escrow).
   async function submitOnchain() {
-    const s = [['Seal with a Halo 2 proof (single copy)', 'run'], ['Publish to relay and keep seller keys on this device', 'wait']];
+    const s = [['Seal with Halo 2 proofs (single copy)', 'run'], ['Publish to relay and keep seller keys on this device', 'wait']];
     setSteps([...s]);
     try {
       const payload = await payloadBytes();
-      if (payload.length > (boot.maxPayload || 1953)) throw new Error(`on-chain listings hold up to ${boot.maxPayload || 1953} bytes`);
+      if (payload.length > max) throw new Error(`listings hold up to ${fmtBytes(max)}`);
       const t0 = performance.now();
-      const r = await crypto('seal', { payload });
+      let r;
+      if (payload.length <= (boot.maxPayload || 1953)) r = await crypto('seal', { payload });
+      else {
+        // Offer v3: proofs per 23 KB part; blobs go to the relay's content-addressed store, the listing keeps the manifest.
+        r = await crypto('sealBig', { payload }, (p) => { s[0][2] = partMsg(p); setSteps(s.map((x) => [...x])); });
+        await putBlobs(r.blobs, (done, total) => { s[0][2] = partMsg({ uploaded: done, blobs: total }); setSteps(s.map((x) => [...x])); });
+      }
       s[0] = [s[0][0], 'done', `${((performance.now() - t0) / 1000).toFixed(1)}s on this device`]; s[1][1] = 'run'; setSteps(s.map((x) => [...x]));
       const { listing, seller_token } = await relay('POST', '/listings', {
         title: form.title.trim(), description: form.description.trim(), price_zec: form.price.trim(), filename: file?.name,
@@ -234,14 +246,14 @@ function Sell({ boot }) {
         <label><span className="label">Title</span><input required maxLength={120} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Critical bug report: Acme vault" /></label>
         <label><span className="label">Public description</span><textarea maxLength={2000} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What the buyer gets, without giving it away" /></label>
         <label><span className="label">Price ({form.onchain ? 'TAZ' : 'ZEC'})</span><input className="mono" required inputMode="decimal" pattern="\d{1,8}(\.\d{1,8})?" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0.5" /></label>
-        <label className="check"><input type="checkbox" checked={form.onchain} onChange={(e) => setForm({ ...form, onchain: e.target.checked })} /> <span><b>Settle on Zcash testnet.</b> One copy, priced in TAZ, up to {fmtBytes(boot.maxPayload || 1953)}. Keep My sales open while a buyer pays: your app co-signs their refund and broadcasts the settlement.</span></label>
+        <label className="check"><input type="checkbox" checked={form.onchain} onChange={(e) => setForm({ ...form, onchain: e.target.checked })} /> <span><b>Settle on Zcash testnet.</b> One copy, priced in TAZ, up to {fmtBytes(max)}. Keep My sales open while a buyer pays: your app co-signs their refund and broadcasts the settlement.</span></label>
         {!form.onchain && <label><span className="label">Copies for sale</span><input className="mono" type="number" min={1} max={MAX_COPIES} value={form.copies} onChange={(e) => setForm({ ...form, copies: e.target.value })} /></label>}
         <label><span className="label">Secret content</span>
-          <textarea className="mono" rows={6} disabled={!!file} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Paste the secret text here, or attach a small file below" />
+          <textarea className="mono" rows={6} disabled={!!file} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Paste the secret text here, or attach a file below" />
         </label>
         <label className="file"><span className="label">Or attach a file</span><input type="file" onChange={(e) => setFile(e.target.files[0] || null)} /></label>
         <div className={`meter ${size > max ? 'error' : 'muted'}`}>
-          <span className="mono">{fmtBytes(size)} / {fmtBytes(max)}</span>
+          <span className="mono">{fmtBytes(size)} / {fmtBytes(max)}{bigParts ? ` · ${bigParts} proof${bigParts > 1 ? 's' : ''}${!form.onchain && Number(form.copies) > 1 ? ' per copy' : ''}` : ''}</span>
           <span>The filename is public if you attach a file.</span>
         </div>
         <button className="btn" disabled={busy || boot.state !== 'ready' || size === 0 || size > max}>
@@ -249,7 +261,7 @@ function Sell({ boot }) {
         </button>
       </form>
       {steps && <Steps steps={steps} />}
-      {busy && steps[0][1] === 'run' && <p className="muted small">Each copy needs its own proof, and files over 1.9 KB need more than one. Keep this tab open until listing finishes.</p>}
+      {busy && steps[0][1] === 'run' && <p className="muted small">Every byte's decryption is proven: each copy needs its own proofs, one per 23.8 KB part for larger files (about 100 s per part in a single-threaded tab, less with the threaded engine). Keep this tab open until listing finishes.</p>}
       {err && <p className="error" role="alert">{err}</p>}
     </section>
   );
@@ -394,7 +406,8 @@ function Listing({ id, boot }) {
     if (!data || data.listing.version === 2 || boot.state !== 'ready' || verify.state !== 'idle') return;
     setVerify({ state: 'run' });
     const t0 = performance.now();
-    crypto('verifyOffer', { offer: data.listing.offer, contentHash: data.listing.content_hash })
+    resolveOffer(data.listing.offer)
+      .then((offer) => crypto('verifyOffer', { offer, contentHash: data.listing.content_hash }))
       .then((t) => {
         if (t !== data.listing.t_point) throw new Error('offer is locked to a different key than the listing claims');
         setVerify({ state: 'ok', t, ms: Math.round(performance.now() - t0) });
@@ -434,7 +447,7 @@ function Listing({ id, boot }) {
       while (!sess.signature) { await sleep(2000); sess = (await relay('GET', `/sessions/${session.id}`)).session; }
       s[3][1] = 'done'; s[4][1] = 'run'; upd();
 
-      const bytes = await crypto('unlock', { key: session.id, signature: sess.signature, presig, partial: sess.partial, offer: L.offer });
+      const bytes = await crypto('unlock', { key: session.id, signature: sess.signature, presig, partial: sess.partial, offer: await resolveOffer(L.offer) });
       s[4][1] = 'done'; upd();
       relay('GET', `/listings/${id}`).then(setData).catch(() => {});
       const text = (() => { try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return null; } })();

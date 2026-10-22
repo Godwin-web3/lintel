@@ -24,6 +24,13 @@
 //! Ironwood note covering price + 20,000 + 20,000 (lock coin) + 15,000 zats.
 //! Files named *.SECRET.json hold keys: never commit them.
 //!
+//! Big payloads (offer v3): set `LINTEL_PAYLOAD_BYTES` (e.g. 120000) for the
+//! seller run. The seller then seals with `sealed_big` (every byte proven, in
+//! 23,808-byte parts), uploads each part's blob to the relay's content-addressed
+//! store (PUT /blobs/:sha256) and lists only the manifest, exactly as the app
+//! does; the buyer fetches and re-hashes the blobs, verifies every part proof
+//! and checks the decrypted bytes against the v3 content hash.
+//!
 //! Nothing secret (shares, t, plaintext) is printed. The seller command keeps
 //! the payload in `<dir>/payload.SECRET.txt` only so the buyer run can also
 //! compare bytes (the primary check is the listing's content hash).
@@ -39,11 +46,12 @@ use lintel::chain::{self, NoteRecord, RefundLock, SpendTerms, TransparentKey, Tr
 use lintel::payin::{self, AnchorData, PayOut, PayinPlan, Utxo};
 use lintel::lwd::Lwd;
 use lintel::protocol::{self, parse_scalar, Seller as Payer};
-use lintel::sealed;
+use lintel::{sealed, sealed_big};
 use orchard::keys::{FullViewingKey, Scope, SpendingKey};
 use serde_json::{json, Value};
 
-const PRICE_ZEC: &str = "0.02";
+/// Listing price; `LINTEL_PRICE_ZEC` overrides it (a cheaper listing saves testnet funds).
+fn price_zec() -> String { std::env::var("LINTEL_PRICE_ZEC").unwrap_or_else(|_| "0.02".into()) }
 const LOCK_VALUE: u64 = chain::LOCK_UTXO_VALUE; // 20,000, same as onchain.js
 const CLAIM_BLOCKS: u32 = 60; // same as onchain.js
 const POLL: Duration = Duration::from_secs(5);
@@ -75,20 +83,64 @@ impl Relay {
     }
     async fn get(&self, path: &str) -> Result<Value> { self.call(reqwest::Method::GET, path, None, None).await }
     async fn post(&self, path: &str, body: Value, token: Option<&str>) -> Result<Value> { self.call(reqwest::Method::POST, path, Some(body), token).await }
+    async fn put_blob(&self, id: &str, bytes: &[u8]) -> Result<()> {
+        let res = self.http.put(format!("{}/blobs/{id}", self.base)).body(bytes.to_vec()).send().await.context("relay PUT /blobs")?;
+        ensure!(res.status().is_success(), "relay PUT /blobs/{id}: {}", res.status());
+        Ok(())
+    }
+    async fn get_blob(&self, id: &str) -> Result<Vec<u8>> {
+        let res = self.http.get(format!("{}/blobs/{id}", self.base)).send().await.context("relay GET /blobs")?;
+        ensure!(res.status().is_success(), "relay GET /blobs/{id}: {}", res.status());
+        let b = res.bytes().await?.to_vec();
+        ensure!(sealed_big::blob_id(&b) == id, "blob {id} does not match its content address");
+        Ok(b)
+    }
 }
+
+/// Offer as the buyer checks it: v1 (one proof) or v3 (big, blobs fetched).
+enum BuyerOffer { V1(sealed::SealedOffer), V3(sealed_big::BigOffer) }
+
+const BIG: usize = sealed_big::CHUNKS;
 
 // ---------------------------------------------------------------- seller (one shot, then exits)
 
 async fn seller(dir: &str, relay_url: &str) -> Result<()> {
     let relay = Relay::new(relay_url)?;
-    let payload = format!("Lintel live agent sale: sealed finding #{} (seller app closed; lintel-agent settled this)", hex::encode(rand::random::<[u8; 4]>()));
-    let keys = sealed::prove::setup::<{ sealed::CHUNKS }>().map_err(|e| anyhow!("{e:?}"))?;
-    // Same as the wasm `Merchant::new` + `seal` the app runs.
+    let tag = hex::encode(rand::random::<[u8; 4]>());
+    let want_len: usize = std::env::var("LINTEL_PAYLOAD_BYTES").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let payload = if want_len > 0 {
+        // A large text document: numbered lines, each unique, so a wrong byte anywhere shows.
+        let mut p = format!("Lintel live agent sale (offer v3, every byte proven): sealed dataset #{tag}\n");
+        let mut i = 0u64;
+        while p.len() < want_len { p.push_str(&format!("{i:08} {:016x} lintel big-payload line\n", (i ^ 0x5bd1e995).wrapping_mul(0x9e3779b97f4a7c15))); i += 1; }
+        p.truncate(want_len);
+        p
+    } else {
+        format!("Lintel live agent sale: sealed finding #{tag} (seller app closed; lintel-agent settled this)")
+    };
+    // Same as the wasm `Merchant::new` + `seal` / `bigSealer` the app runs.
     let (t, s) = sealed::new_secret();
     let m = protocol::Buyer::with_secret(t);
-    let offer = sealed::seal::<{ sealed::CHUNKS }>(&keys, s, payload.as_bytes()).map_err(|e| anyhow!(e))?;
-    let content_hash = sealed::field_hex(&sealed::content_hash_bytes::<{ sealed::CHUNKS }>(payload.as_bytes()).unwrap());
-    ensure!(sealed::verify_offer(&keys, &offer, &m.t_point(), offer.content_hash), "own offer does not verify");
+    let (offer_json, content_hash) = if payload.len() > sealed::BYTES_PER_CHUNK * (sealed::CHUNKS - 1) {
+        let t0 = std::time::Instant::now();
+        let keys = sealed_big::prove::setup::<BIG>().map_err(|e| anyhow!("{e:?}"))?;
+        let threads = std::env::var("LINTEL_PART_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+        let t1 = std::time::Instant::now();
+        let offer = sealed_big::seal_parallel::<BIG>(&keys, s, payload.as_bytes(), threads).map_err(|e| anyhow!(e))?;
+        let prove_s = t1.elapsed().as_secs_f64();
+        let h = sealed_big::content_hash_bytes::<BIG>(payload.as_bytes()).unwrap();
+        ensure!(sealed_big::verify_offer(&keys, &offer, &m.t_point(), &h), "own offer does not verify");
+        let (manifest, blobs) = offer.to_manifest();
+        for (r, b) in manifest.parts.iter().zip(&blobs) { relay.put_blob(&r.blob, b).await?; }
+        log("seal", json!({ "offer": "v3", "payload_bytes": payload.len(), "parts": blobs.len(), "blob_bytes": blobs.iter().map(|b| b.len()).sum::<usize>(),
+            "keygen_s": (t1 - t0).as_secs_f64(), "prove_s": prove_s, "blobs_uploaded": true }));
+        (serde_json::to_string(&manifest)?, hex::encode(h))
+    } else {
+        let keys = sealed::prove::setup::<{ sealed::CHUNKS }>().map_err(|e| anyhow!("{e:?}"))?;
+        let offer = sealed::seal::<{ sealed::CHUNKS }>(&keys, s, payload.as_bytes()).map_err(|e| anyhow!(e))?;
+        ensure!(sealed::verify_offer(&keys, &offer, &m.t_point(), offer.content_hash), "own offer does not verify");
+        (serde_json::to_string(&offer.to_wire())?, sealed::field_hex(&sealed::content_hash_bytes::<{ sealed::CHUNKS }>(payload.as_bytes()).unwrap()))
+    };
     let state = MerchantState { sk_b: sc_hex(&m.sk_b), secret: sealed::field_hex(&s), negated: false };
 
     // Payout wallet (the app uses its device wallet's address).
@@ -102,8 +154,8 @@ async fn seller(dir: &str, relay_url: &str) -> Result<()> {
     // POST /listings: the body App.jsx `submitOnchain` sends.
     let r = relay.post("/listings", json!({
         "title": "Live agent sale (testnet)", "description": "Sold while the seller's browser was closed; lintel-agent settled it.",
-        "price_zec": PRICE_ZEC, "content_hash": content_hash, "merchant_vk": pt_hex(&m.vk_b), "t_point": pt_hex(&m.t_point()),
-        "offer": serde_json::to_string(&offer.to_wire())?, "size": payload.len(),
+        "price_zec": price_zec(), "content_hash": content_hash, "merchant_vk": pt_hex(&m.vk_b), "t_point": pt_hex(&m.t_point()),
+        "offer": offer_json, "size": payload.len(),
     }), None).await?;
     let listing = &r["listing"];
     let lid = listing["id"].as_str().ok_or_else(|| anyhow!("no listing id"))?.to_string();
@@ -115,7 +167,7 @@ async fn seller(dir: &str, relay_url: &str) -> Result<()> {
     fs::write(format!("{dir}/handoff.SECRET.json"), serde_json::to_string_pretty(&handoff)?)?;
     fs::write(format!("{dir}/payload.SECRET.txt"), &payload)?;
     fs::write(format!("{dir}/listing.json"), serde_json::to_string_pretty(&json!({ "listing_id": lid, "relay": relay_url,
-        "payout_address": payout_ua, "content_hash": content_hash, "price_zec": PRICE_ZEC }))?)?;
+        "payout_address": payout_ua, "content_hash": content_hash, "price_zec": price_zec() }))?)?;
     log("seller", json!({ "listing_id": lid, "content_hash": content_hash, "handoff": format!("{dir}/handoff.SECRET.json"),
         "note": "seller process exits now; only lintel-agent acts for the seller from here" }));
     Ok(())
@@ -176,12 +228,31 @@ async fn buyer(dir: &str, relay_url: &str, payin_mode: bool) -> Result<()> {
     // pay-in: wait for the external wallet's payment BEFORE opening a session
     // (the app does the same, so a slow payment never holds the seller up)
     let paid = if payin_mode { Some(detect_payment(&l, dir, &fvk, &tkey, escrow_value).await?) } else { None };
-    let keys = sealed::prove::setup::<{ sealed::CHUNKS }>().map_err(|e| anyhow!("{e:?}"))?;
-    let offer = sealed::SealedOffer::from_wire(&serde_json::from_str(listing["offer"].as_str().unwrap())?).ok_or_else(|| anyhow!("bad offer"))?;
     let t_listing = protocol::parse_point(listing["t_point"].as_str().unwrap()).ok_or_else(|| anyhow!("bad T"))?;
-    let want_hash = sealed::parse_field(listing["content_hash"].as_str().unwrap()).ok_or_else(|| anyhow!("bad hash"))?;
-    ensure!(sealed::verify_offer(&keys, &offer, &t_listing, want_hash), "offer proof does not verify");
-    log("offer", json!({ "listing_id": lid, "proof_verified": true, "price_zats": price }));
+    let want_hash_hex = listing["content_hash"].as_str().unwrap().to_string();
+    let offer_v: Value = serde_json::from_str(listing["offer"].as_str().unwrap())?;
+    let offer = if offer_v["v"] == 3 {
+        // v3: the relay holds the manifest; fetch each blob, check its SHA-256, verify every part.
+        let t0 = std::time::Instant::now();
+        let man: sealed_big::BigOfferWire = serde_json::from_value(offer_v)?;
+        let mut blobs = vec![];
+        for r in &man.parts { blobs.push(relay.get_blob(&r.blob).await?); }
+        let o = sealed_big::BigOffer::from_manifest(&man, &blobs).ok_or_else(|| anyhow!("blobs do not match the manifest"))?;
+        let keys = sealed_big::prove::setup::<BIG>().map_err(|e| anyhow!("{e:?}"))?;
+        let want: [u8; 32] = hex::decode(&want_hash_hex)?.try_into().map_err(|_| anyhow!("bad hash"))?;
+        let t1 = std::time::Instant::now();
+        ensure!(sealed_big::verify_offer_parallel(&keys, &o, &t_listing, &want, 2), "offer proof does not verify");
+        log("offer", json!({ "listing_id": lid, "offer": "v3", "parts": o.parts.len(), "size": listing["size"], "proof_verified": true,
+            "verify_s": t1.elapsed().as_secs_f64(), "fetch_and_keygen_s": (t1 - t0).as_secs_f64(), "price_zats": price }));
+        BuyerOffer::V3(o)
+    } else {
+        let keys = sealed::prove::setup::<{ sealed::CHUNKS }>().map_err(|e| anyhow!("{e:?}"))?;
+        let o = sealed::SealedOffer::from_wire(&serde_json::from_value(offer_v)?).ok_or_else(|| anyhow!("bad offer"))?;
+        let want_hash = sealed::parse_field(&want_hash_hex).ok_or_else(|| anyhow!("bad hash"))?;
+        ensure!(sealed::verify_offer(&keys, &o, &t_listing, want_hash), "offer proof does not verify");
+        log("offer", json!({ "listing_id": lid, "proof_verified": true, "price_zats": price }));
+        BuyerOffer::V1(o)
+    };
 
     // ---- session (mode chain) and B1
     let mut payer = Payer::new();
@@ -308,9 +379,19 @@ async fn buyer(dir: &str, relay_url: &str, payin_mode: bool) -> Result<()> {
     let (raw, settle_h) = l.wait_mined(&settle_txid, STEP_TIMEOUT_SECS).await?;
     let on_chain = protocol::find_signature(&raw, &pre.r_hex, &pre.vk_hex, &pre.sighash_hex).ok_or_else(|| anyhow!("signature not found in the mined settlement"))?;
     let t_rec = protocol::extract_t(parse_scalar(&hex::encode(&on_chain[32..])).unwrap(), parse_scalar(&pre.s_a_hex).unwrap(), partial.s_b);
-    let opened = sealed::open(t_rec, &offer).ok_or_else(|| anyhow!("decryption failed"))?;
-    let got_hash = sealed::content_hash_bytes::<{ sealed::CHUNKS }>(&opened).ok_or_else(|| anyhow!("payload too large"))?;
-    let hash_ok = got_hash == want_hash;
+    let (opened, got_hash_hex) = match &offer {
+        BuyerOffer::V1(o) => {
+            let b = sealed::open(t_rec, o).ok_or_else(|| anyhow!("decryption failed"))?;
+            let h = sealed::content_hash_bytes::<{ sealed::CHUNKS }>(&b).ok_or_else(|| anyhow!("payload too large"))?;
+            (b, sealed::field_hex(&h))
+        }
+        BuyerOffer::V3(o) => {
+            let b = sealed_big::open(t_rec, o).ok_or_else(|| anyhow!("decryption failed"))?;
+            let h = sealed_big::content_hash_bytes::<BIG>(&b).ok_or_else(|| anyhow!("payload too large"))?;
+            (b, hex::encode(h))
+        }
+    };
+    let hash_ok = got_hash_hex == want_hash_hex;
     let bytes_ok = rd("payload.SECRET.txt").map(|p| p == opened).ok();
     let final_session = relay.get(&format!("/sessions/{sid}")).await?["session"].clone();
     let final_listing = relay.get(&format!("/listings/{lid}")).await?["listing"].clone();

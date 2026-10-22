@@ -15,7 +15,7 @@
 // Every step is idempotent and resumable: `advanceBuyer` / `advanceSeller`
 // look at the relay session plus local state and do the next thing, so a
 // reload continues where it stopped.
-import { crypto, relay, store, randomHex } from './api.js';
+import { crypto, relay, store, randomHex, resolveOffer } from './api.js';
 
 const C = (fn, ...args) => crypto('chain', { fn, args });
 const enc = new TextEncoder();
@@ -401,7 +401,7 @@ export async function advanceBuyer(listing, verifiedT) {
   if (ch.settle_txid !== c.settleInfo.txid) throw new Error('seller posted a different settlement txid than the one we signed');
   const tx = await chainTxMined(ch.settle_txid);
   if (!tx) return { phase: 'broadcast', note: `Settlement ${ch.settle_txid.slice(0, 12)}… broadcast; waiting for it to be mined`, refund };
-  const bytes = await crypto('unlockFromTx', { key: sid, rawTx: tx.data, presig: c.presig, partial: c.partial, offer: listing.offer });
+  const bytes = await crypto('unlockFromTx', { key: sid, rawTx: tx.data, presig: c.presig, partial: c.partial, offer: await resolveOffer(listing.offer) });
   putBuy(lid, (x) => { x.settledHeight = tx.height; });
   return { phase: 'done', done: true, plaintext: bytes, note: `Settled at block ${tx.height}; t extracted from the mined transaction and verified on this device` };
 }

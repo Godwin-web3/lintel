@@ -29,6 +29,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createStorage } from './storage.js';
+import { createBlobStore, BLOB_ID, sha256hex } from './blobs.js';
 import * as lwd from './lwd.js';
 export { decodeRawTransaction } from './lwd.js';
 
@@ -38,9 +39,16 @@ const ORIGINS = (process.env.ALLOWED_ORIGINS || '*').split(',').map((s) => s.tri
 const MAX_BODY = 64 * 1024;
 const MAX_UNITS = Number(process.env.MAX_UNITS || 20);
 const MAX_PAYLOAD_V2 = 7905; // lintel_wasm.maxPayloadV2(): 4 parts x 64 chunks x 31 bytes - 31
+// Offer v3 (big payloads, lintel_wasm.maxPayloadBig()): up to 64 proven parts
+// of 768 field elements each; ciphertext + proofs live in content-addressed
+// blobs (PUT/GET /blobs/:sha256), the listing keeps only the manifest.
+const MAX_PAYLOAD_BIG = 1523681; // (768 * 64 - 1) * 31
+const BIG_N = 768, BIG_MAX_PARTS = 64;
+const MAX_BLOB = Number(process.env.MAX_BLOB || 48 * 1024); // one part: 48 + 768*32 + ~4.5 KB proof
 const MAX_LISTINGS = Number(process.env.MAX_LISTINGS || 5000);
 
 export const storage = createStorage({ ...process.env, DATA_FILE: DATA });
+export const blobs = createBlobStore({ ...process.env, DATA_FILE: DATA });
 const db = await storage.load();
 // save(): something changed; the backend persists only records whose JSON
 // differs from what it last wrote. touch(): the exact records that changed.
@@ -63,6 +71,24 @@ const str = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max
 const jsonStr = (v, max) => { if (typeof v !== 'string' || v.length > max) return false; try { JSON.parse(v); return true; } catch { return false; } };
 class Bad extends Error { constructor(m, code = 400) { super(m); this.code = code; } }
 const need = (cond, msg) => { if (!cond) throw new Bad(msg); };
+
+// Offer v3 manifest: shape checks here, and every blob it names must already
+// be uploaded. The proofs themselves are checked by the buyer's app.
+// Returns the payload ceiling the offer allows.
+async function checkOffer(offerStr) {
+  let o; try { o = JSON.parse(offerStr); } catch { throw new Bad('offer must be JSON'); }
+  if (!o || o.v !== 3) return null; // v1/v2 offers carry everything inline
+  need(o.n === BIG_N, `offer v3 parts must hold ${BIG_N} elements`);
+  need(isHex(o.t_point, 64) && isHex(o.content_hash, 64), 'offer v3 needs t_point and content_hash');
+  need(Array.isArray(o.parts) && o.parts.length >= 1 && o.parts.length <= BIG_MAX_PARTS, `offer v3 has 1..${BIG_MAX_PARTS} parts`);
+  for (const [j, p] of o.parts.entries()) {
+    need(p && isHex(p.hash, 64) && BLOB_ID.test(p.blob) && p.offset === j * BIG_N / 2, `offer v3 part ${j} is malformed`);
+    need(Number.isInteger(p.len) && p.len > 0 && p.len <= MAX_BLOB, `offer v3 part ${j} has a bad length`);
+    need(p.data === undefined, 'upload blobs to /blobs; the offer carries only the manifest');
+    need(await blobs.has(p.blob), `blob ${p.blob.slice(0, 12)}… is not uploaded`);
+  }
+  return MAX_PAYLOAD_BIG;
+}
 
 function publicListing(l, { offers = false } = {}) {
   const { seller_token_hash, ...rest } = l;
@@ -163,6 +189,20 @@ const HEIGHT = (h) => { const n = Number(h); need(Number.isInteger(n) && n > 0 &
 const routes = [
   ['GET', /^\/health$/, () => ({ ok: true })],
 
+  // Content-addressed blobs (offer v3 parts). The name must be the SHA-256 of
+  // the bytes; anything else is refused. Public data, write-once, immutable.
+  ['PUT', /^\/blobs\/([0-9a-f]{64})$/, async ([bid], body) => {
+    need(Buffer.isBuffer(body) && body.length > 0, 'blob body required');
+    if (sha256hex(body) !== bid) throw new Bad('blob does not match its SHA-256 name', 422);
+    try { return { blob: bid, created: await blobs.put(bid, body), size: body.length }; }
+    catch (e) { if (e.code === 507) throw new Bad(e.message, 507); throw e; }
+  }],
+  ['GET', /^\/blobs\/([0-9a-f]{64})$/, async ([bid]) => {
+    const b = await blobs.get(bid);
+    if (!b) throw new Bad('not found', 404);
+    return { [RAW]: b };
+  }],
+
   ['GET', /^\/listings$/, () => ({
     listings: Object.values(db.listings)
       .sort((a, b) => b.created_at - a.created_at)
@@ -173,7 +213,7 @@ const routes = [
       }),
   })],
 
-  ['POST', /^\/listings$/, (_, body) => {
+  ['POST', /^\/listings$/, async (_, body) => {
     need(Object.keys(db.listings).length < MAX_LISTINGS, 'relay is full');
     if (body.version === 2) return createV2(body);
     need(str(body.title, 120), 'title required (max 120 chars)');
@@ -184,7 +224,8 @@ const routes = [
     need(isHex(body.t_point, 64), 't_point must be 32-byte hex');
     need(jsonStr(body.offer, 48 * 1024), 'offer must be JSON (max 48 KB)');
     need(body.filename === undefined || str(body.filename, 120), 'filename too long');
-    need(Number.isInteger(body.size) && body.size >= 0 && body.size <= 4096, 'size invalid');
+    const cap = (await checkOffer(body.offer)) ?? 4096;
+    need(Number.isInteger(body.size) && body.size >= 0 && body.size <= cap, 'size invalid');
     const tok = token();
     const l = {
       id: id(), created_at: Date.now(), status: 'open',
@@ -333,11 +374,13 @@ const routes = [
   // ---------- v2: presale listings ----------
 
   // Seller adds another pre-sealed copy (its own t, key share, nonce, proof).
-  ['POST', /^\/listings\/([\w-]+)\/units$/, ([lid], body, auth) => {
+  ['POST', /^\/listings\/([\w-]+)\/units$/, async ([lid], body, auth) => {
     const l = v2(lid);
     if (!tokOk(auth, l.seller_token_hash)) throw new Bad('seller token required', 401);
     need(l.units.length < MAX_UNITS, `at most ${MAX_UNITS} copies per listing`);
     const u = checkUnit(body.unit); assertFreshUnit(l, u);
+    const cap = (await checkOffer(u.offer)) ?? MAX_PAYLOAD_V2;
+    need(l.size <= cap, 'this copy cannot hold the listing size');
     l.units.push(u); l.status = v2Status(l); touch(['listings', lid]);
     return { listing: publicListing(l) };
   }],
@@ -411,14 +454,15 @@ function orderCtx(oid, auth) {
   if (!l || !tokOk(auth, l.seller_token_hash)) throw new Bad('seller token required', 401);
   return [o, l, l.units[o.unit]];
 }
-function createV2(body) {
+async function createV2(body) {
   need(str(body.title, 120), 'title required (max 120 chars)');
   need(body.description === undefined || (typeof body.description === 'string' && body.description.length <= 2000), 'description too long');
   need(typeof body.price_zec === 'string' && /^\d{1,8}(\.\d{1,8})?$/.test(body.price_zec) && Number(body.price_zec) > 0, 'price_zec must be a positive decimal');
   need(isHex(body.content_hash, 64), 'content_hash must be 32-byte hex');
   need(body.filename === undefined || str(body.filename, 120), 'filename too long');
-  need(Number.isInteger(body.size) && body.size >= 0 && body.size <= MAX_PAYLOAD_V2, 'size invalid');
   const unit = checkUnit(body.unit);
+  const cap = (await checkOffer(unit.offer)) ?? MAX_PAYLOAD_V2;
+  need(Number.isInteger(body.size) && body.size >= 0 && body.size <= cap, 'size invalid');
   const tok = token();
   const l = {
     id: id(), version: 2, created_at: Date.now(), status: 'open',
@@ -430,12 +474,14 @@ function createV2(body) {
   return { listing: publicListing(l), seller_token: tok };
 }
 
+const RAW = Symbol('raw');
+
 function cors(req, res) {
   const origin = req.headers.origin;
   const allow = ORIGINS.includes('*') ? '*' : (ORIGINS.includes(origin) ? origin : ORIGINS[0]);
   res.setHeader('Access-Control-Allow-Origin', allow);
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   // The app is cross-origin isolated (COOP/COEP) for threaded proving; CORS
   // already makes these responses loadable, CORP states it explicitly.
@@ -460,17 +506,25 @@ export const server = http.createServer((req, res) => {
   if (!route) return send(res, 404, { error: 'not found' });
   const params = url.pathname.match(route[1]).slice(1);
   const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || null;
+  const limit = req.method === 'PUT' ? MAX_BLOB : MAX_BODY;
   let size = 0; const chunks = [];
-  req.on('data', (c) => { size += c.length; if (size > MAX_BODY) { send(res, 413, { error: 'body too large' }); req.destroy(); } else chunks.push(c); });
+  req.on('data', (c) => { size += c.length; if (size > limit) { if (!res.writableEnded) send(res, 413, { error: 'body too large' }); req.destroy(); } else chunks.push(c); });
   req.on('end', () => {
     if (res.writableEnded) return;
     try {
       let body = {};
+      if (req.method === 'PUT') body = Buffer.concat(chunks);
       if (req.method === 'POST') {
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { throw new Bad('invalid JSON'); }
         if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Bad('body must be an object');
       }
-      Promise.resolve(route[2](params, body, auth)).then((out) => send(res, 200, out)).catch((e) => fail(res, e));
+      Promise.resolve().then(() => route[2](params, body, auth)).then((out) => {
+        if (out && out[RAW]) {
+          res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': out[RAW].length, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
+          return res.end(out[RAW]);
+        }
+        send(res, 200, out);
+      }).catch((e) => fail(res, e));
     } catch (e) {
       fail(res, e);
     }

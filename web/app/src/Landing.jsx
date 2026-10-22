@@ -179,13 +179,13 @@ export default function Landing() {
             <div className="band-head">
               <div>
                 <div className="label">Use cases</div>
-                <h2>For anything you can seal in a few kilobytes.</h2>
+                <h2>For anything you can seal in a megabyte or so.</h2>
               </div>
-              <p>Up to 1,953 bytes per on-chain listing and 7,905 bytes per multi-copy listing. Enough for a report, a key, or the key to something larger.</p>
+              <p>Up to 1.5 MB per listing, on-chain or multi-copy, with every byte's decryption proven: small files in one proof, larger ones in proven 23 KB parts stored by content address. Enough for a report, a dataset sample, a PoC repo archive or a key.</p>
             </div>
             <div className="uses">
               <div><span className="label">01</span><h3>Bug-bounty reports</h3><p>Show the protocol a proof that your report matches the hash you published. Payment and disclosure happen in one step.</p></div>
-              <div><span className="label">02</span><h3>Datasets</h3><p>Sell a small dataset, or the decryption key to a large one hosted anywhere. The buyer knows what they are getting before they pay.</p></div>
+              <div><span className="label">02</span><h3>Datasets</h3><p>Sell a dataset of up to 1.5 MB with every byte proven, or the decryption key to a larger one hosted anywhere (then only the key is proven). The buyer knows what they are getting before they pay.</p></div>
               <div><span className="label">03</span><h3>Research</h3><p>Release findings to whoever pays, with proof that the text is exactly the one you committed to.</p></div>
               <div><span className="label">04</span><h3>Digital goods</h3><p>Licence keys, access codes, files. Each copy has its own unlock key, so one sale never opens another.</p></div>
             </div>

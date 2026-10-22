@@ -140,6 +140,17 @@ pub fn seal_unit(payload: &[u8]) -> R<String> {
     Ok(serde_json::json!({ "unit": unit, "secret": secret }).to_string())
 }
 
+/// A fresh unit without an offer yet, for payloads above `maxPayloadV2()`:
+/// the app seals with `new BigSealer(JSON.parse(secret).s, payload)`, uploads
+/// the blobs and sets `unit.offer` to the manifest. Returns `{ unit, secret }`.
+#[wasm_bindgen(js_name = presaleNewUnit)]
+pub fn presale_new_unit() -> R<String> {
+    let (sec, u) = presale::new_unit();
+    let unit = UnitW { t_point: ph(&u.t), merchant_vk: ph(&u.vk), r_b: ph(&u.r), pok: pok_to(&u.pok), offer: None };
+    let secret = serde_json::to_string(&SecretW { sk: sh(&sec.sk), r: sh(&sec.r), s: sealed::field_hex(&sec.s) }).unwrap();
+    Ok(serde_json::json!({ "unit": unit, "secret": secret }).to_string())
+}
+
 /// Public check of a buyer's order (PoK + pre-signature) for a unit.
 #[wasm_bindgen(js_name = checkOrder)]
 pub fn check_order(unit: &str, order: &str) -> R<bool> {
@@ -167,7 +178,9 @@ pub fn seller_complete(secret: &str, order: &str) -> R<String> {
 pub fn verify_unit(unit: &str, expected_hash: &str) -> R<()> {
     let (u, offer) = unit_from(unit)?;
     if !u.verify_pok() { return Err(err("seller proof of knowledge is invalid")); }
-    let o = offer_from(offer.as_deref().ok_or_else(|| err("unit has no offer"))?)?;
+    let offer = offer.as_deref().ok_or_else(|| err("unit has no offer"))?;
+    if let Some(o) = crate::big::parse(offer) { return crate::big::verify(&o?, &u.t, expected_hash); }
+    let o = offer_from(offer)?;
     let h: [u8; 32] = hex::decode(expected_hash).ok().and_then(|v| v.try_into().ok()).ok_or_else(|| err("invalid content hash"))?;
     if !with_keys(|k| sealed_multi::verify_offer(k, &o, &u.t, &h))? {
         return Err(err("offer proof does not verify"));
@@ -203,7 +216,9 @@ pub fn buyer_unlock(keep: &str, unit: &str, order: &str, completion: &str) -> R<
     let sig: [u8; 64] = hex::decode(&d.signature).ok().and_then(|v| v.try_into().ok()).ok_or_else(|| err("signature must be 64 bytes"))?;
     let done = Completion { sig, enc_sb: sc(&d.enc_sb, "masked share")? };
     let t = presale::buyer_extract(&BuyerKeep { e: sc(&e, "buyer key")? }, &u, &o, &done).map_err(err)?;
-    let offer = offer_from(offer.as_deref().ok_or_else(|| err("unit has no offer"))?)?;
+    let offer = offer.as_deref().ok_or_else(|| err("unit has no offer"))?;
+    if let Some(o) = crate::big::parse(offer) { return crate::big::open(t, &o?); }
+    let offer = offer_from(offer)?;
     sealed_multi::open(t, &offer).ok_or_else(|| err("decryption failed"))
 }
 

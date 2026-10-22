@@ -12,6 +12,7 @@ let L = null;
 let ready = null;
 let params = null;
 let v1Ready = false;
+let bigLoad = null;
 const merchants = new Map(); // listingId -> Merchant
 const payers = new Map(); // sessionKey -> Payer
 
@@ -44,7 +45,37 @@ async function boot({ threads } = {}) {
   // The digest of this file is pinned inside the WASM; a swapped file is rejected.
   params = new Uint8Array(await res.arrayBuffer());
   L.warmUpV2WithParams(params);
-  return { maxPayload: L.maxPayloadBytes(), maxPayloadV2: L.maxPayloadV2(), threads: engine.threads };
+  return {
+    maxPayload: L.maxPayloadBytes(), maxPayloadV2: L.maxPayloadV2(),
+    maxPayloadBig: L.maxPayloadBig ? L.maxPayloadBig() : 0, bigPartBytes: L.bigPartBytes ? L.bigPartBytes() : 0,
+    threads: engine.threads,
+  };
+}
+
+// Big-payload (offer v3) keys: params-big.bin (2 MB, k = 15, digest pinned in
+// the WASM) is fetched and the keys built only when a big offer is first used.
+function ensureBig() {
+  bigLoad ??= (async () => {
+    await ready;
+    if (L.bigReady()) return;
+    const res = await fetch('/params-big.bin');
+    if (!res.ok) throw new Error('could not load big-payload proving parameters');
+    L.warmUpBigWithParams(new Uint8Array(await res.arrayBuffer()));
+  })();
+  return bigLoad.catch((e) => { bigLoad = null; throw e; });
+}
+const NEEDS_KEYS = new Set(['verifyOffer', 'unlock', 'unlockFromTx', 'verifyUnit', 'buyerOrder', 'buyerUnlock']);
+const isBig = (v) => typeof v === 'string' && v.includes('"v":3');
+
+// Proves every part of a BigSealer, reporting progress; returns the blobs.
+function proveAll(sealer, progress) {
+  const parts = sealer.parts(), blobs = [], t0 = performance.now();
+  for (let j = 0; j < parts; j++) {
+    const bytes = sealer.provePart(j);
+    blobs.push({ id: sealer.blobId(j), bytes });
+    progress({ part: j + 1, parts, ms: Math.round(performance.now() - t0) });
+  }
+  return blobs;
 }
 
 // Single-copy (v1) keys are built on first use only.
@@ -68,6 +99,18 @@ const ops = {
   boot: (args) => (ready ??= boot(args)),
 
   // ---- seller ----
+  // Single-copy listing (on-chain flow) above maxPayloadBytes(): offer v3.
+  // Returns the manifest as `offer` plus the blobs the app must upload first.
+  async sealBig({ payload }, progress) {
+    await ensureBig();
+    const m = new L.Merchant();
+    const sealer = m.bigSealer(payload);
+    progress({ part: 0, parts: sealer.parts(), ms: 0 });
+    const blobs = proveAll(sealer, progress);
+    const out = { offer: sealer.manifest(), blobs, contentHash: L.contentHashBig(payload), tPoint: m.tPoint(), merchantVk: m.verificationKey(), state: m.exportState() };
+    sealer.free(); m.free();
+    return out;
+  },
   async seal({ payload }) {
     await ready;
     ensureV1();
@@ -177,7 +220,7 @@ const ops = {
   },
 };
 
-Object.assign(ops, v2ops(() => L, () => ready));
+Object.assign(ops, v2ops(() => L, () => ready, { ensureBig, proveAll }));
 
 let chainLoad = null;
 function chainEngine() {
@@ -198,7 +241,9 @@ function hex2u8(h) {
 
 self.onmessage = async ({ data: { id, op, args } }) => {
   try {
-    const result = await ops[op](args || {});
+    // Verifying or opening a v3 offer (inline or inside a unit) needs the big keys first.
+    if (NEEDS_KEYS.has(op) && args && (isBig(args.offer) || isBig(args.unit))) await ensureBig();
+    const result = await ops[op](args || {}, (progress) => self.postMessage({ id, progress }));
     self.postMessage({ id, ok: true, result });
   } catch (e) {
     self.postMessage({ id, ok: false, error: String(e?.message || e) });

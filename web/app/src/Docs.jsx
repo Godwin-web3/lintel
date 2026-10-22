@@ -12,7 +12,7 @@ export const NAV = [
   ['Start', [['', 'Overview', 'README.md'], ['quickstart', 'Quickstart', 'quickstart.md']]],
   ['Concepts', [['how-it-works', 'How it works', 'how-it-works.md'], ['security-model', 'Security model', 'security-model.md'], ['architecture', 'Architecture', 'architecture.md']]],
   ['Run it', [['self-hosting', 'Self-hosting', 'self-hosting.md'], ['cli', 'CLI reference', 'cli.md']]],
-  ['Reference', [['faq', 'FAQ', 'faq.md'], ['testnet-evidence', 'Testnet evidence', 'testnet-evidence.md'], ['onchain', 'On-chain settlement, in depth', 'onchain.md'], ['relay-perf', 'Presale, relay and proving', 'relay-perf.md']]],
+  ['Reference', [['faq', 'FAQ', 'faq.md'], ['testnet-evidence', 'Testnet evidence', 'testnet-evidence.md'], ['onchain', 'On-chain settlement, in depth', 'onchain.md'], ['relay-perf', 'Presale, relay and proving', 'relay-perf.md'], ['big-payloads', 'Big payloads', 'big-payloads.md']]],
 ];
 const PAGES = NAV.flatMap(([, items]) => items);
 const bySlug = Object.fromEntries(PAGES.map((p) => [p[0], p]));

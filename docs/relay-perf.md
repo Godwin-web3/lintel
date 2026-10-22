@@ -205,3 +205,10 @@ Max payload: 7,905 bytes (4 parts). The limit is the relay body size (each part
 adds ~13 KB to a copy's offer). A new, larger pinned params file (k = 14) would
 allow one proof per ~4 KB but doubles the download and proving memory, so it
 was not done.
+
+**Superseded for payloads above 7,905 bytes (offer v3).** Big payloads now use
+768-element parts at k = 15 with a rate-2 keystream and a second pinned file
+(`params-big.bin`), and their ciphertext and proofs move to content-addressed
+relay blobs, so the relay body cap no longer limits the payload: up to
+1,523,681 bytes. v1/v2 offers below that are unchanged. See
+[Big payloads](big-payloads.md).

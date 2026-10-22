@@ -176,6 +176,11 @@ impl Merchant {
         Ok(serde_json::to_string(&offer.to_wire()).unwrap())
     }
 
+    /// Seals a payload of any size up to `maxPayloadBig()` as offer v3 under
+    /// this listing's adaptor secret, one proof per `provePart` call.
+    #[wasm_bindgen(js_name = bigSealer)]
+    pub fn big_sealer(&self, payload: &[u8]) -> R<big::BigSealer> { big::BigSealer::from_secret(self.secret, payload) }
+
     /// Proof of knowledge of the key share, bound to both keys and the session.
     #[wasm_bindgen(js_name = proveKnowledge)]
     pub fn prove_knowledge(&self, payer_vk: &str, session: &[u8]) -> R<String> {
@@ -279,6 +284,11 @@ impl Payer {
     /// Returns T (hex) on success, so the session can be pinned to it.
     #[wasm_bindgen(js_name = verifyOffer)]
     pub fn verify_offer(&self, offer: &str, expected_hash: &str) -> R<String> {
+        if let Some(o) = big::parse(offer) {
+            let o = o?;
+            big::verify(&o, &o.t_point, expected_hash)?;
+            return Ok(pt_hex(&o.t_point));
+        }
         let o = offer_from(offer)?;
         let h = sealed::parse_field(expected_hash).ok_or_else(|| err("invalid content hash"))?;
         if !with_keys(|k| sealed::verify_offer(k, &o, &o.t_point, h))? {
@@ -344,6 +354,7 @@ impl Payer {
         let s = parse_scalar(&hex::encode(&sig[32..])).ok_or_else(|| err("invalid s"))?;
         let s_a = sc(&pre.s_a_hex, "s_a")?;
         let t = protocol::extract_t(s, s_a, partial_from(partial)?.s_b);
+        if let Some(o) = big::parse(offer) { return big::open(t, &o?); }
         sealed::open(t, &offer_from(offer)?).ok_or_else(|| err("decryption failed"))
     }
 }
@@ -450,6 +461,7 @@ mod params_tests {
 }
 
 mod v2;
+pub mod big;
 #[cfg(feature = "chain")]
 pub mod chain;
 #[cfg(feature = "threads")]
