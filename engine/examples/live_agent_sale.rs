@@ -43,7 +43,8 @@ use lintel::sealed;
 use orchard::keys::{FullViewingKey, Scope, SpendingKey};
 use serde_json::{json, Value};
 
-const PRICE_ZEC: &str = "0.02";
+/// Listing price; `LINTEL_PRICE_ZEC` overrides it (a cheaper listing saves testnet funds).
+fn price_zec() -> String { std::env::var("LINTEL_PRICE_ZEC").unwrap_or_else(|_| "0.02".into()) }
 const LOCK_VALUE: u64 = chain::LOCK_UTXO_VALUE; // 20,000, same as onchain.js
 const CLAIM_BLOCKS: u32 = 60; // same as onchain.js
 const POLL: Duration = Duration::from_secs(5);
@@ -102,7 +103,7 @@ async fn seller(dir: &str, relay_url: &str) -> Result<()> {
     // POST /listings: the body App.jsx `submitOnchain` sends.
     let r = relay.post("/listings", json!({
         "title": "Live agent sale (testnet)", "description": "Sold while the seller's browser was closed; lintel-agent settled it.",
-        "price_zec": PRICE_ZEC, "content_hash": content_hash, "merchant_vk": pt_hex(&m.vk_b), "t_point": pt_hex(&m.t_point()),
+        "price_zec": price_zec(), "content_hash": content_hash, "merchant_vk": pt_hex(&m.vk_b), "t_point": pt_hex(&m.t_point()),
         "offer": serde_json::to_string(&offer.to_wire())?, "size": payload.len(),
     }), None).await?;
     let listing = &r["listing"];
@@ -115,7 +116,7 @@ async fn seller(dir: &str, relay_url: &str) -> Result<()> {
     fs::write(format!("{dir}/handoff.SECRET.json"), serde_json::to_string_pretty(&handoff)?)?;
     fs::write(format!("{dir}/payload.SECRET.txt"), &payload)?;
     fs::write(format!("{dir}/listing.json"), serde_json::to_string_pretty(&json!({ "listing_id": lid, "relay": relay_url,
-        "payout_address": payout_ua, "content_hash": content_hash, "price_zec": PRICE_ZEC }))?)?;
+        "payout_address": payout_ua, "content_hash": content_hash, "price_zec": price_zec() }))?)?;
     log("seller", json!({ "listing_id": lid, "content_hash": content_hash, "handoff": format!("{dir}/handoff.SECRET.json"),
         "note": "seller process exits now; only lintel-agent acts for the seller from here" }));
     Ok(())
