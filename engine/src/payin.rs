@@ -403,7 +403,7 @@ mod tests {
 
     #[test]
     fn payment_ua_carries_both_receivers() {
-        let sk = loop { if let Some(k) = Option::from(SpendingKey::from_bytes(rand::random())) { break k; } };
+        let sk = loop { if let Some(k) = Option::<SpendingKey>::from(SpendingKey::from_bytes(rand::random())) { break k; } };
         let a = FullViewingKey::from(&sk).address_at(0u32, Scope::External);
         let tk = TransparentKey::random();
         let ua = payment_ua(&a, &tk.pubkey_hash());

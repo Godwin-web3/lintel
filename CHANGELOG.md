@@ -4,6 +4,7 @@ All notable changes to Lintel. Dates are 2026.
 
 ## Unreleased
 
+- Pay from another wallet: buyers fund an on-chain purchase from any Zcash testnet wallet via a ZIP 321 request (QR) to a per-purchase pay-in wallet; shielded (Ironwood) and transparent payments both work, the escrow is funded straight from the payment, and leftovers can be withdrawn. Live testnet sales paid through each receiver (fundings 4,529,996 and 4,530,012).
 - Seller agent (`lintel-agent`): finishes on-chain sales while the seller's browser is closed. Live testnet sale settled by the agent alone (funding 4,529,902, settlement 4,529,908).
 - Brand identity v1.0: trilithon mark, palette, Instrument Serif / Geist / Geist Mono, self-hosted fonts, brand kit in `brand/`.
 - Landing page at `/`, marketplace moved to `/app` (old links redirect), docs at `/docs`, 404 page, social cards and app icons.

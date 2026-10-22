@@ -345,7 +345,7 @@ async fn buyer(dir: &str, relay_url: &str, payin_mode: bool) -> Result<()> {
         "funding_source": match &paid {
             None => json!({ "kind": "device wallet (Ironwood note)" }),
             Some(p) => json!({ "kind": "pay from another wallet: per-purchase pay-in wallet funded by a ZIP 321 payment",
-                "request": p.request, "payment": p.payment, "detected": p.detected,
+                "request": p.request, "payment": fs::read(format!("{dir}/ext-payment.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(p.payment.clone()), "detected": p.detected,
                 "funding_inputs": { "ironwood_note": p.note.as_ref().map(|n| json!({ "txid": n.txid, "height": n.height, "value": n.value })),
                     "transparent": p.utxos }, "separate_sweep_tx": false }),
         },
@@ -469,7 +469,7 @@ async fn detect_payment(l: &Lwd, dir: &str, fvk: &FullViewingKey, tkey: &Transpa
         }
         match payin::select(&notes, &utxos, &outputs) {
             Ok((note, coins)) => {
-                let detected = json!({ "tip": tip, "scanned_from": start_h, "ironwood_notes": notes.len(), "transparent_coins": utxos.len(), "after_secs": t0.elapsed().as_secs() });
+                let detected = json!({ "tip": l.latest().await?, "scanned_from": start_h, "ironwood_notes": notes.len(), "transparent_coins": utxos.len(), "after_secs": t0.elapsed().as_secs() });
                 log("payin-detected", detected.clone());
                 let payment: Value = fs::read(format!("{dir}/ext-payment.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
                 return Ok(Paid { note, utxos: coins, request: req, payment, detected });
@@ -479,6 +479,51 @@ async fn detect_payment(l: &Lwd, dir: &str, fvk: &FullViewingKey, tkey: &Transpa
         ensure!(t0.elapsed().as_secs() < STEP_TIMEOUT_SECS, "no payment detected");
         tokio::time::sleep(Duration::from_secs(15)).await;
     }
+}
+
+/// `payin-withdraw <dest>`: the recovery path. Finds everything the pay-in
+/// wallet holds now (settlement change or refund notes, the returned lock coin,
+/// an unused payment) exactly as the app's Wallet page does, and sweeps it to
+/// `dest` (one Ironwood note per transaction, plus every coin).
+async fn payin_withdraw(dir: &str, dest: &str) -> Result<()> {
+    let k: Value = serde_json::from_slice(&fs::read(format!("{dir}/payin.SECRET.json"))?)?;
+    let sk = spending_key(k["sk"].as_str().unwrap())?;
+    let tkey = TransparentKey::from_bytes(hex::decode(k["tsk"].as_str().unwrap())?.try_into().unwrap())?;
+    let fvk = FullViewingKey::from(&sk);
+    let req: Value = serde_json::from_slice(&fs::read(format!("{dir}/payin-request.json"))?)?;
+    let l = Lwd::connect().await?;
+    let tip = l.latest().await?;
+    let taddr = tkey.address();
+    let mut utxos = Vec::new();
+    for (txid, vout, _, h) in l.address_utxos(&taddr).await? { utxos.push(payin::utxo_from_tx(&l.tx(&txid).await?.data, h, &txid, vout, &taddr)?); }
+    let (mut notes, mut nfs) = (Vec::<NoteRecord>::new(), std::collections::HashSet::new());
+    let mut from = req["start_height"].as_u64().unwrap() as u32;
+    while from <= tip {
+        let to = (from + 99).min(tip);
+        for (h, txid, acts) in l.compact_range(from, to).await? {
+            for a in &acts { nfs.insert(a.nf.clone()); }
+            if payin::scan_compact(&fvk, &acts)?.is_empty() { continue; }
+            for f in chain::find_notes(&l.tx(&txid).await?.data, h, &fvk)? { notes.push(NoteRecord::from_found(&f, &txid, h)); }
+        }
+        from = to + 1;
+    }
+    let unspent: Vec<NoteRecord> = notes.into_iter().filter(|n| !nfs.contains(&hex::encode(n.note().unwrap().nullifier(&fvk).to_bytes()))).collect();
+    let note = unspent.iter().max_by_key(|n| n.value).cloned();
+    let total = note.as_ref().map_or(0, |n| n.value) + utxos.iter().map(|u| u.value).sum::<u64>();
+    let t_dest = dest.starts_with("tm");
+    let fee = payin::plan_fee(note.is_some() as usize, utxos.len(), (!t_dest) as usize, t_dest as usize);
+    ensure!(total > fee, "pay-in wallet holds {total} zats, fee is {fee}");
+    let plan = PayinPlan { note: note.clone(), utxos: utxos.clone(), outputs: vec![PayOut { to: dest.into(), value: total - fee }], change_to: None, target_height: tip + 1, expiry_height: tip + 40 };
+    let b = payin::build(&sk, &tkey, &plan, &anchor_data(&l, note.as_ref(), tip).await?)?;
+    broadcast(&l, hex::decode(&b.raw)?, &b.txid).await?;
+    log("payin-withdraw", json!({ "broadcast": b.txid, "value": total - fee, "fee": b.fee }));
+    let (_, h) = l.wait_mined(&b.txid, STEP_TIMEOUT_SECS).await?;
+    let rec = json!({ "txid": b.txid, "height": h, "to": dest, "value": total - fee, "fee": b.fee,
+        "inputs": { "ironwood_note": note.map(|n| json!({ "txid": n.txid, "height": n.height, "value": n.value })), "transparent": utxos },
+        "unspent_notes_found": unspent.len() });
+    fs::write(format!("{dir}/payin-withdraw.json"), serde_json::to_string_pretty(&rec)?)?;
+    log("payin-withdraw", rec);
+    Ok(())
 }
 
 #[tokio::main]
@@ -492,6 +537,7 @@ async fn main() -> Result<()> {
         "buyer" => buyer(dir, relay, a.get(3).map(String::as_str) == Some("payin")).await,
         "payin-request" => payin_request(dir, relay).await,
         "external-pay" => external_pay(dir, relay).await,
+        "payin-withdraw" => payin_withdraw(dir, relay).await,
         _ => bail!("role must be seller or buyer"),
     }
 }

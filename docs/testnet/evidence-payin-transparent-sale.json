@@ -1,0 +1,119 @@
+{
+  "branch": "77190ad9",
+  "buyer": {
+    "content_hash": "aa54ad11fd00177c416f048fdc6a824db12e7151561d10e8fa0fbd1ef8279e33",
+    "decrypted_bytes_match_sealed_payload": true,
+    "decrypted_matches_content_hash": true,
+    "offer_proof_verified": true,
+    "t_recovered_from_mined_tx": true
+  },
+  "claim_window": {
+    "refund_first_valid_height": 4530054,
+    "settlement_expiry_height": 4530053
+  },
+  "escrow_address": "utest10hvhu2v3say25c4hkfjml0hukhgj4suq0t7dfd592ll6wchta079tl9z9n2t05u5kz3t7565en0altx4jjtqg2d7gdg6lz3y65gvg2hq",
+  "flow": "pay from another wallet: buyer funded from a per-purchase pay-in wallet that an external wallet paid via a ZIP 321 request (P2PKH receiver: transparent coin); seller side run only by lintel-agent; buyer = engine/examples/live_agent_sale.rs (buyer payin) over relay HTTP + lightwalletd",
+  "funding": {
+    "escrow_value": 2020000,
+    "height": 4529996,
+    "lock_coin": {
+      "outpoint": "b5341a69d0db7c469c24d7a3b2eb44caba69aaa633e121bee4a3c50ed96de328:0",
+      "value": 20000
+    },
+    "txid": "b5341a69d0db7c469c24d7a3b2eb44caba69aaa633e121bee4a3c50ed96de328"
+  },
+  "funding_source": {
+    "detected": {
+      "after_secs": 45,
+      "ironwood_notes": 0,
+      "scanned_from": 4529989,
+      "tip": 4529991,
+      "transparent_coins": 1
+    },
+    "funding_inputs": {
+      "ironwood_note": null,
+      "transparent": [
+        {
+          "address": "tmMviYuAx5LdnMUpuWELDraZCB4tWY4CmC4",
+          "height": 4529992,
+          "txid": "d38a395f17644f8c27598ac5a0c5ae6c6d287dbb872ff52b793bce7b2c25e3ed",
+          "value": 2055000,
+          "vout": 0
+        }
+      ]
+    },
+    "kind": "pay from another wallet: per-purchase pay-in wallet funded by a ZIP 321 payment",
+    "payment": {
+      "amount_zats": 2055000,
+      "fee": 15000,
+      "height": 4529992,
+      "paid_to": "tmMviYuAx5LdnMUpuWELDraZCB4tWY4CmC4",
+      "pool": "transparent",
+      "spent_note": "4e0d2f44ee5f8c343cc6d88fbd28df9f8b7a634e2e76d425bd38ee674803ffa2#0",
+      "txid": "d38a395f17644f8c27598ac5a0c5ae6c6d287dbb872ff52b793bce7b2c25e3ed"
+    },
+    "request": {
+      "amount_zats": 2055000,
+      "listing_id": "s5xqO2fUYp8H",
+      "orchard_ua": "utest1dzm4s242lfvfz8mx72cvsx40hmskvath7qnnxgu55yxgvzjvt5kq00fpzppzw757lmgec5ujqlfvaxkmjczj24fxwjd0znru2qpca860",
+      "payment_ua": "utest1j35z9yjlmaa4qgkugs3sqffmd6unjc0wte3j4sdfzlm5846hxg88ts27mp596pujc5htz6g3ggxzafswpddn2rdxd259t4ceawds4ujgq6fw9l3fvnj69nwrjncdydz9par7y6h3p4m",
+      "start_height": 4529989,
+      "taddr": "tmMviYuAx5LdnMUpuWELDraZCB4tWY4CmC4",
+      "uri": "zcash:utest1j35z9yjlmaa4qgkugs3sqffmd6unjc0wte3j4sdfzlm5846hxg88ts27mp596pujc5htz6g3ggxzafswpddn2rdxd259t4ceawds4ujgq6fw9l3fvnj69nwrjncdydz9par7y6h3p4m?amount=0.02055&message=Lintel%20escrow%20s5xqO2fUYp8H",
+      "uri_transparent": "zcash:tmMviYuAx5LdnMUpuWELDraZCB4tWY4CmC4?amount=0.02055&message=Lintel%20escrow%20s5xqO2fUYp8H"
+    },
+    "separate_sweep_tx": false
+  },
+  "joint_ak": "143298a483ed1b40db966dd6728298c1578e74aa1e6143680995432e6770c10d",
+  "listing_id": "s5xqO2fUYp8H",
+  "listing_status_after": "sold",
+  "network": "testnet",
+  "pool": "Ironwood",
+  "price_zats": 2000000,
+  "refund_presigned_before_funding": {
+    "co_signed_by": "lintel-agent",
+    "n_lock_time": 4530053,
+    "status": "conflicts with the settlement (same escrow nullifier); never broadcast",
+    "txid": "659d6bb6368afacca57d478c8dc927da767894ded595e1e0442b03dd9eae32e3"
+  },
+  "relay": "local (web/relay, node server.js)",
+  "relay_saw_signature": false,
+  "session_id": "MiaHT3ci7yV4",
+  "settlement": {
+    "built_signed_proved_broadcast_by": "lintel-agent",
+    "buyer_change": 10000,
+    "expiry_height": 4530053,
+    "height": 4530002,
+    "merchant_received": 2000000,
+    "rk": "dd0b1d684ac1dfca61a17a093470e47fa496bc8e062718409bb27671282383a0",
+    "sighash": "28c65e4026ae2ff722029960143572433a97d1c6b0afd722faa2f3124ecb65f7",
+    "txid": "f765cb4e12f3a2fa22d7afb0c6d1973a4372351460990222f72fae26405ec628"
+  },
+  "tx_version": "v6",
+  "external_wallet": "stand-in: engine/examples/live_agent_sale.rs external-pay, a separate throwaway key unknown to the pay-in wallet; it read only the ZIP 321 URI, took the receiver from the address and paid from its own Ironwood note. Not a third-party wallet app.",
+  "payin_withdraw": {
+    "fee": 15000,
+    "height": 4530006,
+    "inputs": {
+      "ironwood_note": {
+        "height": 4530002,
+        "txid": "f765cb4e12f3a2fa22d7afb0c6d1973a4372351460990222f72fae26405ec628",
+        "value": 10000
+      },
+      "transparent": [
+        {
+          "address": "tmMviYuAx5LdnMUpuWELDraZCB4tWY4CmC4",
+          "height": 4529996,
+          "txid": "b5341a69d0db7c469c24d7a3b2eb44caba69aaa633e121bee4a3c50ed96de328",
+          "value": 20000,
+          "vout": 0
+        }
+      ]
+    },
+    "to": "utest15uqxep24rvaxnlzax0w5c4xw5tdc3a5w5vw7gd7jeyj2shqv2qs0mcq448f3w32089h2ltn827qjhvdfhmaat6ztm8f8fuggzs6y39hs",
+    "txid": "812fb2324cd7e224a8851c60cf842091cf61c9e06c150ed9140283e86eb38556",
+    "unspent_notes_found": 1,
+    "value": 15000,
+    "what": "recovery path: everything left in the pay-in wallet (settlement change note + returned lock coin) swept out"
+  }
+}

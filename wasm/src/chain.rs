@@ -425,7 +425,7 @@ mod tests {
         let escrow_value = 220_000u64;
         let need = payin::payin_amount(escrow_value);
         let uri = zip321(p["payment_ua"].as_str().unwrap(), need, "Lintel escrow");
-        assert!(uri.starts_with("zcash:utest1") && uri.contains("amount=0.00275&"), "{uri}");
+        assert!(uri.starts_with("zcash:utest1") && uri.contains("amount=0.00255&"), "{uri}");
 
         // an external wallet pays the transparent receiver, and another payment pays the Orchard receiver
         let ext = v(&new_spending_key().unwrap());
