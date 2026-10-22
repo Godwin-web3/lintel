@@ -150,7 +150,7 @@ per byte than the old circuit, from fuller circuits and the rate-2 keystream.
 | Payload | Parts | Prove | Verify | Blobs | Peak memory |
 | --- | --- | --- | --- | --- | --- |
 | 47,585 B | 2 | 26.6 s (1 part at a time) / 26.7 s (2 in parallel) | 0.37 s | 58,208 B | 1.0 GB / 1.7 GB |
-| 1,023,721 B (1 MB) | 43 | BENCH_1MB_PROVE | BENCH_1MB_VERIFY | BENCH_1MB_BLOBS | BENCH_1MB_MEM |
+| 1,023,713 B (1 MB) | 43 | **571 s (9.5 min)**, 1 part at a time | 7.8 s | 1,251,472 B | 1,034 MB |
 
 ### Browser engine (WASM, single thread)
 
@@ -159,8 +159,8 @@ per byte than the old circuit, from fuller circuits and the rate-2 keystream.
 | 30,000 B | 2 | 42.1 s | 103 s per part (206 s) | 2.9 s | 1,018 MB |
 | 1 MB (extrapolated) | 43 | 42 s | about 74 min | about 63 s | about 1 GB |
 
-So: **a 1 MB file proves in about BENCH_1MB_MIN minutes natively on this
-2-core machine**; a typical 8-core laptop should be several times faster
+So: **a 1 MB file proves in 9.5 minutes natively on this 2-core machine**
+(plus 29 s of one-off setup); a typical 8-core laptop should be several times faster
 (not measured here). In a browser tab without threads the same file takes
 over an hour, which is why big payloads are best sealed natively (see
 `engine/examples/live_agent_sale.rs` with `LINTEL_PAYLOAD_BYTES`, which seals,
