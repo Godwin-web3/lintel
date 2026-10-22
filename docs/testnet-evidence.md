@@ -1,6 +1,6 @@
 # Testnet evidence
 
-Every flow below ran on Zcash testnet (NU7, Ironwood pool, v6 transactions) and was mined. Raw records are in [`docs/testnet/`](testnet/). Amounts are in zatoshis (1 TAZ = 100,000,000 zats).
+Every flow below ran on Zcash testnet (NU7, Ironwood pool, v6 transactions) and was mined, newest first. Raw records are in [`docs/testnet/`](testnet/). Amounts are in zatoshis (1 TAZ = 100,000,000 zats).
 
 ## Pay from another wallet (buyer without a device wallet)
 
@@ -65,3 +65,18 @@ A refund broadcast before the lock height was **rejected by consensus** ("transa
 | Refund | Refund | 4,521,289 | `633ac619a5305b961d0d3187f26cc61f6b9211a49b3bb787a30d044aee6a3f03` |
 
 v1 refunds weren't time-locked, which left a race; v2 fixed it. See [On-chain settlement](onchain.md).
+
+## Early adaptor-signature tests (prototype, self-spends)
+
+Before the escrow existed, these showed that a completed Lintel adaptor signature is accepted by the network as an ordinary spend authorization. They are self-spends, not two-party escrows. The fourth fed the real per-action sighash into the CLI and injected the completed signature with `apply_ironwood_signature` (`engine/src/bin/lintel-inject.rs`, now legacy).
+
+| Step | Height | Txid |
+| --- | --- | --- |
+| Single-key adaptor PCZT | 4,503,051 | `77b82ea5167c617a4533c52a8263435a95e767de7e695f9953db00d524983427` |
+| Two-party additive adaptor PCZT | 4,503,072 | `f61ce7bbb0f2a3a1ba11eb28d068bd1f6bda09428f67be8baf2ac7dcd88a85bd` |
+| Two-role settlement | 4,504,858 | `51c6daaf0aba583cfcfed9a928a53d22e5f5f7c3f97db71935a0b6d4387d02b8` |
+| Create → complete → inject → broadcast | 4,505,478 | `97fb254c6d92659f7dfdd730f8bfe57f2c1447ef6ad9ff5fe5725d41fc3adbf8` |
+
+## Check a transaction yourself
+
+Every txid above can be fetched from the public relay's lightwalletd proxy, which returns the raw transaction and the block it was mined in: `https://lintel-relay.onrender.com/chain/tx/<txid>`. `lintel-chain verify-witness --txid <txid>` rebuilds the witness of each Ironwood output and checks it against the chain's tree root. The [Evidence](https://lintel-godwin-web3s-projects.vercel.app/evidence) page links each txid this way.

@@ -31,6 +31,11 @@ local patch is needed any more).
 | v2 sale 4: refund broadcast before the lock | `e78f088e5bae544378439cf8e665fca72abe1f0f1157feaf0167acf1502963b8`, **rejected**: "transaction is locked until after block height 4522333" | (tip 4,522,325) |
 | **v2 sale 4: same refund after the lock** (2,985,000 zats + 20,000-zat lock coin back) | `e78f088e5bae544378439cf8e665fca72abe1f0f1157feaf0167acf1502963b8` | 4,522,335 |
 
+Later runs (the browser sale, the seller agent and paying from another wallet) are under
+[Browser flow](#browser-flow-single-copy-listings), [Pay from another wallet](#pay-from-another-wallet)
+and [Seller agent](#seller-agent-browser-closed); all of them are listed in
+[Testnet evidence](testnet-evidence.md).
+
 Sale 1: the payer read the settlement transaction from lightwalletd, found the spend
 authorization signature, recovered `t`, and decrypted the sealed payload. The merchant received
 2,000,000 zats. Sale 2: the merchant was treated as gone after funding, and the payer recovered
@@ -293,10 +298,12 @@ Browser-flow limits (as of this branch):
   for their own payments, change, refunds and spends.)
 - **Recovery is local.** The signed refund and the wallet key live only in that browser's
   localStorage. Clearing it before broadcasting the refund loses the escrow (testnet funds).
-- **Production build unverified.** `web/app/build.sh` builds the on-chain engine with
+- **Production build.** `web/app/build.sh` builds the on-chain engine with
   `wasm-pack --features chain`; `secp256k1-sys` needs a clang that targets wasm32. The script
   tries to install clang; if the build fails it ships a stub and the on-chain panels say the
-  engine is unavailable. A Vercel build with the on-chain engine has not been verified.
+  engine is unavailable. The Vercel production deployment does include the on-chain engine
+  (checked on 2026-10-22: the app's worker loads `lintel_chain_bg-*.wasm`, served as
+  `application/wasm`).
 
 ## Item by item
 
@@ -548,8 +555,8 @@ The integration test covers the whole flow offline:
 - **Browser UI.** Single-copy listings run on-chain in the browser (see
   [Browser flow](#browser-flow-single-copy-listings)), with its limits: the seller's app or a
   running `lintel-agent` must co-sign the refund before funding, presale listings not wired, minimal wallet that does
-  not track spends made elsewhere, refund kept only in localStorage, and the production
-  (Vercel) build of the on-chain engine unverified (needs clang; stub fallback).
+  not track spends made elsewhere, and refund kept only in localStorage. The production
+  (Vercel) build ships the on-chain engine (it needs clang; a stub is the fallback).
 - **Refund timelock:** implemented (item 5, v2). The `lintel-chain` CLI subcommands accept
   the new `lock`/`t_out` terms fields through JSON. There is no CLI subcommand yet to create
   or sign a transparent key; the `testnet_sale` harness does it.

@@ -1,7 +1,7 @@
 # Lintel web app
 
-A marketplace for **pay-to-decrypt sealed goods**. Sellers seal a secret (a bug
-report, a key, a small file) in their browser; buyers verify a Halo 2 proof that
+A marketplace for **pay-to-decrypt sealed goods**: pay only for what's proven. Sellers seal a secret (a bug
+report, a key, a file up to about 1.5 MB) in their browser; buyers verify a Halo 2 proof that
 the ciphertext decrypts to content with the committed hash, then buy. The
 completed payment signature reveals the unlock secret `t` to the buyer.
 
@@ -25,27 +25,46 @@ Every value from the relay is re-verified in the browser (offer proof, `T`
 binding, proof of knowledge, pre-signature, final signature), so a malicious
 relay can stall a sale but cannot forge one or learn the content.
 
-The proving parameters (`params.bin`, 512 KB, transparent setup) are downloaded
-instead of regenerated, which cuts setup from ~50 s to ~11 s in the browser.
-Their BLAKE2b digest is pinned in the WASM; a substituted file is rejected,
-since swapped generators would break soundness.
+The proving parameters (`params.bin`, 512 KB, and `params-big.bin`, 2 MB, for
+big offers; transparent setup) are downloaded instead of regenerated, which cuts
+setup from ~50 s to ~11 s in the browser. Their BLAKE2b digests are pinned in the
+WASM; a substituted file is rejected, since swapped generators would break
+soundness.
 
-## Presale listings (default for new listings)
+## Listings
 
-New listings use the presale protocol (see [docs/relay-perf.md](../docs/relay-perf.md)):
-several copies, each with its own unlock secret; buyers pre-sign without the
-seller online; the seller's browser completes pending sales the next time the
-app is open on that device, on any page. Payloads up to 7,905 bytes (proved in
-up to 4 parts with the same pinned parameters). Single-copy v1 listings still
-work through the old routes.
+- **Single copy, on Zcash testnet (v1 listings).** Escrow, time-locked refund and
+  settlement are built, proven and checked in the browser; the buyer reads `t`
+  from the mined settlement. Buyers fund from the in-browser wallet or pay a
+  ZIP 321 request from any testnet wallet ("Pay from another wallet"). Sellers
+  keep My sales open or hand the listing to the seller agent (`lintel-agent`).
+  See [docs/onchain.md](../docs/onchain.md).
+- **Multi-copy presale (v2 listings).** Several copies, each with its own unlock
+  secret; buyers pre-sign without the seller online; the seller's browser
+  completes pending sales the next time the app is open on that device, on any
+  page. Settled off-chain. See [docs/relay-perf.md](../docs/relay-perf.md).
+
+Payloads up to 1,523,681 bytes with every byte's decryption proven: one proof up
+to 1,953 bytes, up to four proofs up to 7,905 bytes (presale), then offer v3 in
+23,808-byte parts at k = 15 (`params-big.bin`, 2 MB, fetched on first use), each
+part's ciphertext and proof a SHA-256-named relay blob
+([docs/big-payloads.md](../docs/big-payloads.md)).
+
+## Site routes
+
+`/` landing, `/how-it-works`, `/use-cases`, `/evidence` (txids from
+`docs/testnet/*.json`, imported at build time), `/docs/:page` (rendered from
+`docs/*.md`), `/app` the marketplace (hash-routed: `#/sell`, `#/mine`,
+`#/wallet`, `#/listing/:id`). `vercel.json` rewrites non-asset paths to
+`index.html`, so deep links load.
 
 ## Run locally
 
 ```bash
 # relay
-cd web/relay && npm start                     # :8787
+cd web/relay && npm start                     # :8787 (PORT to change)
 # app (needs Rust + wasm-pack)
-cd web/app && npm install && npm run wasm && npm run dev
+cd web/app && npm install && npm run wasm && npm run wasm:chain && npm run dev
 # end-to-end check (v1 + presale, through a live relay)
 node web/e2e.mjs
 # relay tests (v1, presale, storage backends incl. a mock Upstash)
@@ -65,11 +84,16 @@ PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core/index.js node scripts/benc
 
 ## Current limits (be honest in demos)
 
-- **The pages run the off-chain demo flow.** In the pages, the completed signature still travels through the relay and `sighash`/`alpha` are placeholders.
-  On-chain settlement works on testnet through `lintel-chain` (see [docs/onchain.md](../docs/onchain.md)).
-  The worker already exposes `merchantBindJoint`, `payerBindJoint`, `verifyPayerKnowledge`, `refundPartial`, `refundSign` and `unlockFromTx`.
-  The relay stores write-once public settlement fields (`POST /sessions/:id/chain/:field`) and proxies mined transactions from lightwalletd (`GET /chain/tx/:txid`), so `t` can be taken from the chain instead of the relay.
-- **Copies are pre-sealed.** Each copy costs the seller one proof per part at listing time (threaded proving helps; see [docs/relay-perf.md](../docs/relay-perf.md)). v1 listings still sell once (`t` becomes public after the first completed signature).
-- **Up to 7,905 bytes** of content per presale listing (1,953 on v1). Sealing takes ~30 s per part in a browser single-threaded; verifying ~0.5 s.
-- **The seller must come back once.** Buyers never wait for the seller to start, but a sale only completes when the seller's app next runs: completing reveals `t`, and no third party is given `t`.
-- **Refund:** implemented on chain in `lintel-chain` (v1 pre-signed refund; v2 time-locked transparent lock UTXO), not yet in the pages.
+- **Testnet only, unaudited.**
+- **Someone must act for the seller of an on-chain listing**: the open app or a
+  running `lintel-agent` co-signs the refund before funding and broadcasts the
+  settlement before it expires. There is no hosted agent.
+- **Multi-copy listings settle off-chain**: the completed signature travels
+  through the relay and no coins move.
+- **Copies are pre-sealed.** Each copy costs the seller one proof per part at
+  listing time. v1 listings sell once (`t` becomes public after the sale).
+- **Big files are slow to seal in a browser**: about 100 s per 23.8 KB part
+  single-threaded (over an hour for 1 MB); small files 15 to 30 s; verifying is
+  about 0.5 s per small proof and 1.5 s per big part.
+- **Minimal wallet.** The device wallet knows only notes scanned in by txid; the
+  signed refund lives only in that browser's localStorage.

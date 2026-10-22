@@ -21,7 +21,7 @@ Lintel is built so that the two parties never have to trust each other or the re
 - The adaptor secret `t` (seller) and the signed refund (buyer).
 - Plaintext content.
 
-These live in the browser's memory and `localStorage`. Clearing site data deletes them. **Losing the signed refund while an escrow is open means losing the ability to reclaim it,** so don't clear site data mid-sale.
+These live in the browser's memory and `localStorage`. Clearing site data deletes them. The one exception is a seller's choice: **Hand off to agent** writes a listing's signing share and adaptor secret into a handoff file for `lintel-agent`, which keeps them on the machine it runs on. Anyone with that file or the agent's directory can complete the sale. Pay-in wallets (used by **Pay from another wallet**) keep their keys in the buyer's browser too, and the app offers a backup file. **Losing the signed refund while an escrow is open means losing the ability to reclaim it,** so don't clear site data mid-sale.
 
 ## What the relay sees
 
@@ -46,7 +46,7 @@ Chain data goes through a lightwalletd proxy (`LINTEL_LWD`, default `testnet.zec
 - **Testnet only.** Not for real funds.
 - **Someone must act for the seller to settle.** Settlement needs the seller's app open, or the seller agent (`lintel-agent`) running, to co-sign the refund and broadcast the settlement before the expiry height. If neither does it in time, the buyer refunds. The agent holds the listing's signing share and adaptor secret, so it must run on a machine the seller controls.
 - **Multi-copy (presale) listings settle off-chain.** The completed signature travels through the relay and no ZEC moves; the sighash and randomizer are placeholders until PCZT settlement is wired for presales, so treat presale copies as free.
-- **Minimal wallet.** The built-in testnet wallet doesn't track spent notes or change across sessions.
+- **Minimal wallet.** The built-in testnet wallet only knows notes you scan in by txid and doesn't track spends made elsewhere. Pay-in wallets do scan the chain for their own payments, change and refunds.
 - **Refund state is local.** The signed refund exists only in the buyer's browser storage.
 - **Relay privacy.** As above, the relay operator can view escrows.
 - **Big-offer blobs live on the relay.** A relay that loses or withholds a blob stalls a sale before payment (the buyer cannot verify, so does not pay); a swapped or tampered blob is rejected by its SHA-256 name and by the proofs. Blob uploads are open (size- and quota-capped) and not garbage-collected yet.

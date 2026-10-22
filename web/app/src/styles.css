@@ -329,6 +329,41 @@ section.band { border-bottom: 1px solid var(--slate); padding: calc(var(--s9) + 
 .sitefoot a:hover { color: var(--bone); }
 .sitefoot .fine { margin-top: var(--s4); max-width: 40ch; line-height: 1.6; }
 
+/* site pages (/how-it-works, /use-cases, /evidence) */
+.pagehero { padding: var(--s9) 0 var(--s8); border-bottom: 1px solid var(--slate); }
+.pagehero h1 { font-size: 64px; line-height: 1.02; letter-spacing: -0.02em; margin: var(--s4) 0 var(--s5); max-width: 18ch; }
+.pagehero .lede { font-size: 18px; margin: 0; }
+.closing.short { padding: var(--s9) 0; }
+.closing.short h2 { font-size: 48px; }
+.uses.three { grid-template-columns: repeat(3, 1fr); }
+.ticks.plain li::before { background: var(--ash); }
+.panel > p { margin: 0; }
+.tablewrap { overflow-x: auto; }
+.evidence.sizes td { color: var(--chalk); }
+.evidence.sizes td.mono { color: var(--bone); white-space: nowrap; }
+.evruns { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--s8); }
+.evtoc { position: sticky; top: 108px; align-self: start; }
+.evtoc ul { list-style: none; margin: var(--s3) 0 0; padding: 0; border-left: 1px solid var(--slate); }
+.evtoc a { display: block; padding: var(--s2) var(--s3); color: var(--ash); text-decoration: none; font-size: 14px; }
+.evtoc a:hover { color: var(--bone); }
+.evrun { margin-bottom: var(--s8); }
+.evrun header h2 { margin: var(--s2) 0 var(--s3); font-size: 32px; }
+.evrun header p { color: var(--chalk); max-width: 68ch; margin-bottom: var(--s4); }
+.evrun .evidence td.what { width: 32%; }
+a.txid { text-decoration-color: var(--slate); }
+a.txid:hover { color: var(--bone); text-decoration-color: var(--bone); }
+
+/* site nav: links inline on wide screens, a menu on narrow ones */
+.navlinks { display: flex; align-items: center; gap: var(--s1); }
+.menubtn { display: none; width: 40px; height: 40px; margin-left: var(--s2); border: 1px solid var(--slate); border-radius: var(--r-md); background: transparent; cursor: pointer; position: relative; }
+.menubtn span, .menubtn span::before, .menubtn span::after { position: absolute; left: 11px; width: 16px; height: 1.5px; background: var(--bone); content: ""; transition: transform var(--dur) var(--ease); }
+.menubtn span { top: 19px; }
+.menubtn span::before { left: 0; top: -5px; }
+.menubtn span::after { left: 0; top: 5px; }
+.sitebar.open .menubtn span { background: transparent; }
+.sitebar.open .menubtn span::before { transform: translateY(5px) rotate(45deg); }
+.sitebar.open .menubtn span::after { transform: translateY(-5px) rotate(-45deg); }
+
 /* ---------- docs ---------- */
 .docs { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--s8); padding-top: var(--s7); padding-bottom: var(--s9); flex: 1; }
 .docnav { position: sticky; top: 108px; align-self: start; max-height: calc(100vh - 128px); overflow: auto; }
@@ -388,6 +423,16 @@ section.band { border-bottom: 1px solid var(--slate); padding: calc(var(--s9) + 
   .uses > div:nth-child(-n + 2) { border-bottom: 1px solid var(--slate); }
   .tri { grid-template-columns: 1fr; gap: var(--s7); }
   .sitefoot .wrap { grid-template-columns: 1fr 1fr; }
+  .uses.three { grid-template-columns: 1fr 1fr 1fr; }
+  .uses.three > div { border-bottom: 0 !important; border-right: 1px solid var(--slate) !important; }
+  .uses.three > div:last-child { border-right: 0 !important; }
+}
+@media (max-width: 900px) {
+  .menubtn { display: inline-block; }
+  .navlinks { display: none; position: absolute; left: 0; right: 0; top: 100%; flex-direction: column; align-items: stretch; gap: 0; background: var(--ink); border-bottom: 1px solid var(--slate); padding: var(--s2) var(--s4) var(--s4); }
+  .sitebar.open .navlinks { display: flex; }
+  .navlinks a { padding: var(--s3) var(--s2); font-size: 16px; border-bottom: 1px solid var(--slate); }
+  .navlinks a:last-child { border-bottom: 0; }
 }
 @media (max-width: 820px) {
   .wrap { padding: 0 var(--s4); }
@@ -403,8 +448,15 @@ section.band { border-bottom: 1px solid var(--slate); padding: calc(var(--s9) + 
   .docnav { display: none; }
   .docnav-mobile { display: block; margin-bottom: var(--s6); }
   .docnav-mobile select { font-size: 15px; margin-top: var(--s2); }
-  .sitenav .hide-sm { display: none; }
   .closing { padding: var(--s9) 0; }
+  .pagehero { padding: var(--s8) 0 var(--s7); }
+  .pagehero h1 { font-size: 48px; }
+  .closing.short h2 { font-size: 38px; }
+  .uses.three { grid-template-columns: 1fr; }
+  .uses.three > div { border-right: 0 !important; border-bottom: 1px solid var(--slate) !important; }
+  .uses.three > div:last-child { border-bottom: 0 !important; }
+  .evruns { grid-template-columns: 1fr; gap: var(--s5); }
+  .evtoc { position: static; }
   .closing h2 { font-size: 44px; }
 }
 @media (max-width: 640px) {
@@ -451,6 +503,10 @@ section.band { border-bottom: 1px solid var(--slate); padding: calc(var(--s9) + 
   .sitenav a { padding: var(--s2) var(--s1); }
   .sitenav .btn { margin-left: var(--s1); }
   .closing h2 { font-size: 38px; }
+  .pagehero h1 { font-size: 40px; }
+  .evrun header h2 { font-size: 28px; }
+  .evidence.sizes thead { display: none; }
+  .evidence.sizes td.mono { font-weight: 600; padding-top: var(--s2); }
   .notfound h1 { font-size: 42px; }
 }
 @media (prefers-reduced-motion: reduce) {

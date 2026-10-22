@@ -1,4 +1,6 @@
-# Lintel — Minimal Two-Party Conditional Settlement
+# Early design note: two-party conditional settlement
+
+> **History (19 Oct 2026).** This is the first design note, from the CLI prototype before sealed goods, escrow and the browser app. It is kept for the record and is not the current design: see [How it works](how-it-works.md) and [On-chain settlement](onchain.md). Role names here follow `engine/src/protocol.rs`, which are the reverse of the marketplace's: the "Seller (A)" below pre-signs, which is the marketplace **buyer**, and the "Buyer (B)" completes with `t`, which is the marketplace **seller**. Selective disclosure now has real prove and verify tests as well as MockProver tests, and the NU7 branch id is built into the current crates (no local patch).
 
 ## Participants
 - **Seller (A)**: holds partial key `sk_a`. Creates the adaptor pre-signature.
@@ -25,9 +27,9 @@ The spend is valid if and only if the party that knows `t` completes the signatu
 ## Privacy claims (current scope)
 - The on-chain transaction reveals only what any shielded Zcash transaction reveals (nullifiers, value commitments, ciphertext).
 - The adaptor secret `t` is not published on-chain.
-- Selective disclosure (MinValue / InvoiceHash) is implemented as a Halo 2 circuit and passes MockProver, bound to a txid.
+- Selective disclosure (MinValue / InvoiceHash) is implemented as a Halo 2 circuit and passes MockProver, bound to a txid. (Since then: real prove/verify tests too, `engine/src/disclosure.rs`.)
 
-## Testnet evidence
+## Testnet evidence (prototype)
 - Single-key adaptor PCZT: `77b82ea5167c617a4533c52a8263435a95e767de7e695f9953db00d524983427` (height 4,503,051)
 - Two-party adaptor PCZT: `f61ce7bbb0f2a3a1ba11eb28d068bd1f6bda09428f67be8baf2ac7dcd88a85bd` (height 4,503,072)
 - Two-role settlement: `51c6daaf0aba583cfcfed9a928a53d22e5f5f7c3f97db71935a0b6d4387d02b8` (height 4,504,858)

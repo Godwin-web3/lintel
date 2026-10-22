@@ -4,9 +4,11 @@ This walks through a sale on Zcash testnet using only the web app. You need two 
 
 > Testnet only. TAZ has no value. Everything below happens on Zcash testnet.
 
-Open the app: <https://lintel-godwin-web3s-projects.vercel.app/app>. The first load downloads the prover (WebAssembly plus a 512 KB parameter file); the header shows **Prover ready** when it is done, usually in about 10 seconds.
+Open the app: <https://lintel-godwin-web3s-projects.vercel.app/app>. The first load downloads the prover (WebAssembly plus a 512 KB parameter file; a second 2 MB file is fetched only when a big listing is first sealed or verified); the header shows **Prover ready** when it is done, usually in about 10 seconds.
 
 ## 1. Get testnet coins (buyer)
+
+You can skip this section if you already have a Zcash testnet wallet: at step 3, **Pay from another wallet** lets you pay from it instead.
 
 1. In the buyer's browser, open **Wallet** and choose **Create wallet**. The wallet's spending key is generated and kept in this browser only.
 2. Copy the `utest1…` address it shows.
@@ -26,20 +28,33 @@ Open the app: <https://lintel-godwin-web3s-projects.vercel.app/app>. The first l
 
 1. In the seller's browser, open **Sell**.
 2. Enter a title, a public description and a price.
-3. Tick **Settle on Zcash testnet** for an on-chain sale. On-chain listings are single copy. Any listing holds up to about 1.5 MB; files over 1,953 bytes (on-chain) or 7,905 bytes (multi-copy) are proven in 23.8 KB parts, each taking roughly 100 s in a single-threaded browser tab ([big payloads](big-payloads.md)).
-4. Paste the secret text or attach a small file, then choose **Seal and list**. Sealing produces a Halo 2 proof on your device; it takes roughly 15 to 30 seconds on a laptop.
-5. Open **My sales** and leave it open. For an on-chain sale, the seller's app has to co-sign the buyer's refund before the buyer funds, and broadcast the settlement afterwards.
+3. Tick **Settle on Zcash testnet** for an on-chain sale. On-chain listings are single copy and priced in TAZ. Any listing holds up to 1,523,681 bytes (about 1.5 MB); files over 1,953 bytes (on-chain) or 7,905 bytes (multi-copy) are proven in 23.8 KB parts, each taking roughly 100 s in a single-threaded browser tab, so a 1 MB file takes over an hour there ([big payloads](big-payloads.md)).
+4. Paste the secret text or attach a file, then choose **Seal and list**. Sealing produces Halo 2 proofs on your device; a small file takes roughly 15 to 30 seconds on a laptop.
+5. Open **My sales**. For an on-chain sale, someone has to co-sign the buyer's refund before the buyer funds, and broadcast the settlement afterwards: either leave **My sales** open, or choose **Hand off to agent** and run the seller agent (see [below](#sell-with-your-browser-closed)).
 
 The seller also needs a testnet wallet to be paid into, but it can be empty: open **Wallet** and choose **Create wallet** before a buyer arrives. Its address becomes the payout address. The wallet does not pick up the payout on its own; scan the settlement txid to add it.
 
 ## 3. Buy (buyer)
 
 1. Open the listing from **Market**. The browser verifies the listing's proof and shows **Proof verified** when the ciphertext is bound to the key the payment will be locked to.
-2. Under **Buy on-chain**, check the escrow amount and choose **Buy on-chain**.
+2. Under **Buy on-chain**, check the escrow amount and choose **Buy on-chain** to pay from this browser's wallet. Or choose **Pay from another wallet**: the app opens a per-purchase pay-in wallet and shows a ZIP 321 request (QR code and URI) for the escrow, lock coin and funding fee. Pay it from any Zcash testnet wallet, to the shielded (Orchard receiver, Ironwood note) or transparent address. Once the payment is mined the app funds the escrow straight from it, and anything left over (change, the returned lock coin, a refund) can be withdrawn from **Wallet**.
 3. The log shows each step: joint key, funding and refund built, refund co-signed by the seller, funding broadcast, settlement built and signed, settlement mined. Funding and settlement each wait for a block (about 75 seconds on testnet).
 4. When the settlement is mined, your browser reads the completed signature from the transaction, extracts the key and decrypts. The content appears under **Unlocked**.
 
 A recorded run of exactly this flow took 6 minutes 34 seconds end to end; see [Testnet evidence](testnet-evidence.md).
+
+## Sell with your browser closed
+
+On a single-copy on-chain listing, **Hand off to agent** in **My sales** downloads a handoff file holding that listing's signing share, adaptor secret and relay token. Anyone with the file can complete the sale, so keep it on a machine you control. Then, on that machine:
+
+```bash
+cd engine && cargo build --release --features agent --bin lintel-agent
+B=../target/release                           # or $CARGO_TARGET_DIR/release
+$B/lintel-agent import handoff.SECRET.json    # checks it against the relay
+$B/lintel-agent run                           # leave running; close the browser
+```
+
+The agent co-signs the buyer's refund, builds, proves and broadcasts the settlement, and pays the price to your app wallet's address; it never holds a wallet spending key. See [CLI reference](cli.md#lintel-agent-seller-agent).
 
 ## If the seller disappears
 
@@ -49,7 +64,7 @@ The signed refund lives only in that browser's local storage. Clearing site data
 
 ## Multi-copy listings (off-chain)
 
-Leave **Settle on Zcash testnet** unticked and choose a number of copies. Each copy is sealed with its own secret at listing time. Buyers can order while the seller is offline: they verify the proof and pre-sign immediately, and the sale completes the next time the seller opens the app on that device, on any app page. These listings move no ZEC: the completed signature is delivered through the relay. See [How it works](how-it-works.md#multi-copy-presale-listings).
+Leave **Settle on Zcash testnet** unticked and choose a number of copies. Each copy is sealed with its own secret at listing time. Buyers can order while the seller is offline: they verify the proof and pre-sign immediately, and the sale completes the next time the seller opens the app on that device, on any app page. These listings move no ZEC: the completed signature is delivered through the relay. See [How it works](how-it-works.md#6-multi-copy-presale-listings).
 
 ## Run it locally
 

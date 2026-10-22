@@ -1,18 +1,14 @@
-// Landing page (/). Every number here comes from the public testnet records
-// in docs/testnet/*.json, imported at build time.
+// Landing page (/): short on purpose. Hero, the three steps in brief, a few
+// use cases and one call to action. Depth lives on /how-it-works, /use-cases,
+// /evidence and /docs. Numbers come from docs/testnet/*.json via evidence.js.
 import { Link, SiteHeader, SiteFooter, useTitle } from './site.jsx';
-import browserSettle from '../../../docs/testnet/evidence-browser-settle.json';
-import browserRefund from '../../../docs/testnet/evidence-browser-refund.json';
-import v2Refund from '../../../docs/testnet/evidence-v2-refund.json';
-import cliSettle from '../../../docs/testnet/evidence-settle.json';
-
-const n = (x) => Number(x).toLocaleString('en-US');
+import { browserSettle, n } from './evidence.js';
 
 function Receipt() {
   const s = browserSettle;
   const secs = s.elapsed_s;
   return (
-    <aside className="receipt" aria-label="Most recent browser sale on Zcash testnet">
+    <aside className="receipt" aria-label="A browser sale on Zcash testnet">
       <header>
         <span className="label">Browser sale · Zcash testnet</span>
         <span className="chip ok">Settled</span>
@@ -27,42 +23,26 @@ function Receipt() {
       </dl>
       <footer>
         Both sides in the web app, {Math.floor(secs / 60)} min {secs % 60} s end to end.{' '}
-        <Link to="/docs/testnet-evidence">See the record</Link>
+        <Link to="/evidence">All testnet runs</Link>
       </footer>
     </aside>
   );
 }
 
-function Trilithon() {
-  // Brand mark geometry on its 96-unit grid, scaled 4x (beam 80x17, posts 21x49,
-  // 6-unit reveal), with quiet annotations. Fills come from the brand tokens.
-  return (
-    <figure className="tri-figure" aria-label="Diagram: two posts carry one beam. The posts are the buyer's and seller's key shares; the beam is the settlement signature that reveals the key.">
-      <svg viewBox="0 0 400 372" role="img" aria-hidden="true">
-        <text x="40" y="38">Beam · the settlement</text>
-        <rect className="beam" x="40" y="56" width="320" height="68" />
-        <text x="200" y="97" textAnchor="middle" className="v on-beam">s = s_a + s_b + t</text>
-        <rect className="post" x="76" y="148" width="84" height="196" />
-        <rect className="post" x="240" y="148" width="84" height="196" />
-        <text x="200" y="254" textAnchor="middle" className="v">t</text>
-        <line className="gap" x1="166" y1="344" x2="234" y2="344" strokeDasharray="2 4" />
-        <text x="118" y="368" textAnchor="middle">Buyer</text>
-        <text x="282" y="368" textAnchor="middle">Seller</text>
-      </svg>
-    </figure>
-  );
-}
+const STEPS = [
+  ['Seal and prove', 'The seller encrypts the file on their device under a fresh secret and publishes a Halo 2 proof that the ciphertext opens to content with a stated hash. Every byte is covered, up to about 1.5 MB.'],
+  ['Verify, then pay', 'The buyer checks the proof locally before any money moves, then pays into a shielded escrow neither side can spend alone. A time-locked refund is co-signed first.'],
+  ['Settlement reveals the key', 'To get paid, the seller completes an adaptor signature. The mined transaction carries the key; the buyer reads it from the chain and decrypts.'],
+];
 
-const EVIDENCE = [
-  { what: 'Browser sale: escrow funded', why: 'Buyer’s device wallet pays into the joint escrow, with a time-locked refund already co-signed.', txid: browserSettle.funding.txid, h: browserSettle.funding.height },
-  { what: 'Browser sale: settlement', why: 'Seller’s browser broadcasts the adaptor-signed spend. The buyer’s browser read t from it and decrypted the file.', txid: browserSettle.settlement.txid, h: browserSettle.settlement.height },
-  { what: 'Browser refund after the lock', why: `An escrow that never settled, returned with its pre-signed refund once the chain passed block ${n(browserRefund.n_lock_time)}.`, txid: browserRefund.refund_txid, h: browserRefund.refund_height },
-  { what: 'Time lock enforced by consensus', why: `The same refund bytes were rejected before block ${n(v2Refund.claim_window.refund_first_valid_height)} and mined after it.`, txid: v2Refund.refund.txid, h: v2Refund.refund.height },
-  { what: 'First two-party settlement (CLI)', why: 'Escrow note owned by the joint key; t recovered from the mined transaction.', txid: cliSettle.settlement.txid, h: cliSettle.settlement.height },
+const USES = [
+  ['Bug-bounty reports', 'Prove the report matches the hash you published. Payment and disclosure are one step.'],
+  ['Datasets', 'A sample or a full set up to 1.5 MB, every byte proven before the buyer pays.'],
+  ['Research', 'Release findings to whoever pays, provably the exact text you committed to.'],
 ];
 
 export default function Landing() {
-  useTitle('Lintel · Pay to unlock, proven before you pay');
+  useTitle('Lintel · Pay only for what’s proven');
   return (
     <div className="site">
       <SiteHeader />
@@ -73,13 +53,13 @@ export default function Landing() {
               <div className="label">Zcash testnet · Open source</div>
               <h1 className="display"><span className="line">Pay to unlock.</span> <span className="line"><em>Proven</em> before you pay.</span></h1>
               <p className="lede">
-                Lintel sells sealed files for Zcash. Before paying, the buyer’s browser checks a zero-knowledge
-                proof that the ciphertext opens to exactly the content that was promised. The payment signature
-                carries the key, so getting paid and unlocking the file are the same transaction.
+                Lintel sells sealed files for Zcash. Before paying, the buyer’s device checks a zero-knowledge proof
+                that the ciphertext opens to exactly the content promised. The payment signature carries the key, so
+                getting paid and unlocking the file are the same transaction.
               </p>
               <div className="ctas">
                 <a className="btn solid" href="/app">Launch app</a>
-                <Link className="btn ghost" to="/docs">Read the docs</Link>
+                <Link className="btn ghost" to="/how-it-works">How it works</Link>
               </div>
             </div>
             <Receipt />
@@ -94,83 +74,14 @@ export default function Landing() {
                 <h2>Three steps. Nobody in the middle holds the key.</h2>
               </div>
               <p>
-                The proof, the escrow and the key exchange are one construction: an adaptor signature locked to the
-                same secret that encrypts the file. Every step runs on the buyer’s and seller’s own devices.
+                Proving, signing and decryption run on the buyer’s and seller’s own devices. The relay passes public
+                messages only. <Link to="/how-it-works">The full picture</Link>
               </p>
             </div>
             <div className="steps3">
-              <div>
-                <span className="num">01</span>
-                <h3>Seal and prove</h3>
-                <p>The seller encrypts the content in their browser under a fresh secret <code>t</code> and publishes a Halo 2 proof: this ciphertext decrypts, under the secret behind <code>T</code>, to content with this hash.</p>
-                <p className="tech">T = [t]·G · c<sub>i</sub> = m<sub>i</sub> + Poseidon(t, i+1) · Poseidon(m) = h</p>
-              </div>
-              <div>
-                <span className="num">02</span>
-                <h3>Pay into escrow</h3>
-                <p>The buyer verifies the proof on their device, then funds a joint escrow that neither side can spend alone. A refund is co-signed before any money moves.</p>
-                <p className="tech">ak = vk_buyer + vk_seller · refund time-locked past the claim window</p>
-              </div>
-              <div>
-                <span className="num">03</span>
-                <h3>Settlement reveals the key</h3>
-                <p>To get paid, the seller completes the adaptor signature and broadcasts it. The buyer reads <code>t</code> from the mined transaction and decrypts. No one has to hand anything over.</p>
-                <p className="tech">t = s − s_a − s_b</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="band" id="name">
-          <div className="wrap tri">
-            <Trilithon />
-            <div>
-              <div className="label">The name</div>
-              <p className="quote display">Two posts. One beam.</p>
-              <p className="lede">
-                A lintel is the beam laid across two posts to make a doorway. It stands only when both posts carry
-                it. Here, buyer and seller each hold half of an adaptor signature. Neither can settle alone, and the
-                transaction that pays the seller is the one that hands the buyer the key.
-              </p>
-              <dl>
-                <div><dt>Left post</dt><dd>The buyer’s key share. It pre-signs only after the proof checks out.</dd></div>
-                <div><dt>Right post</dt><dd>The seller’s key share and the unlock secret <code>t</code>.</dd></div>
-                <div><dt>Beam</dt><dd>The completed signature on chain. Valid only with both shares, and it reveals <code>t</code>.</dd></div>
-              </dl>
-            </div>
-          </div>
-        </section>
-
-        <section className="band" id="guarantees">
-          <div className="wrap">
-            <div className="band-head">
-              <div>
-                <div className="label">Guarantees and limits</div>
-                <h2>What the math says, and where it stops.</h2>
-              </div>
-              <p>Lintel is a working testnet system, not a finished product. These are the properties it enforces today and the ones it does not.</p>
-            </div>
-            <div className="two">
-              <div className="panel">
-                <h3><span className="chip ok">Enforced</span></h3>
-                <ul className="ticks good">
-                  <li><b>Proof before payment.</b> A wrong file, tampered ciphertext, or a key not bound to the payment all fail verification in the buyer’s browser.</li>
-                  <li><b>Neither side settles alone.</b> The escrow’s spend key is the sum of both shares; a spend needs a signature only both together can make.</li>
-                  <li><b>The key comes from the chain.</b> The buyer extracts <code>t</code> from the mined settlement and verifies the signature itself. The relay is not trusted for it.</li>
-                  <li><b>A refund exists before funding.</b> Consensus rejects it until the settlement window closes, so the refund and the settlement are never valid at the same height.</li>
-                  <li><b>Secrets stay on the device.</b> Key shares, <code>t</code> and plaintext never reach the relay; it carries public data only.</li>
-                </ul>
-              </div>
-              <div className="panel">
-                <h3><span className="chip">Limits</span></h3>
-                <ul className="ticks limit">
-                  <li><b>Testnet only, unaudited.</b> It runs on Zcash testnet with TAZ, which has no value.</li>
-                  <li><b>The seller must be online to settle.</b> Their open app co-signs the refund before the buyer funds, and must broadcast the settlement before it expires.</li>
-                  <li><b>Refund only after the lock height.</b> If the seller disappears, the buyer waits about 60 blocks (roughly 75 minutes), then broadcasts the refund kept in that browser.</li>
-                  <li><b>Multi-copy listings settle off-chain.</b> On-chain settlement covers single-copy listings; presale listings complete through the relay and move no ZEC.</li>
-                  <li><b>A hash is not a review.</b> The proof shows the content matches the agreed hash, not that it is worth the price.</li>
-                </ul>
-              </div>
+              {STEPS.map(([h, p], i) => (
+                <div key={h}><span className="num">{String(i + 1).padStart(2, '0')}</span><h3>{h}</h3><p>{p}</p></div>
+              ))}
             </div>
           </div>
         </section>
@@ -180,60 +91,14 @@ export default function Landing() {
             <div className="band-head">
               <div>
                 <div className="label">Use cases</div>
-                <h2>For anything you can seal in a megabyte or so.</h2>
+                <h2>Anything worth proving before it’s paid for.</h2>
               </div>
-              <p>Up to 1.5 MB per listing, on-chain or multi-copy, with every byte's decryption proven: small files in one proof, larger ones in proven 23 KB parts stored by content address. Enough for a report, a dataset sample, a PoC repo archive or a key.</p>
+              <p>Reports, data, research and digital goods. <Link to="/use-cases">More use cases and size limits</Link></p>
             </div>
-            <div className="uses">
-              <div><span className="label">01</span><h3>Bug-bounty reports</h3><p>Show the protocol a proof that your report matches the hash you published. Payment and disclosure happen in one step.</p></div>
-              <div><span className="label">02</span><h3>Datasets</h3><p>Sell a dataset of up to 1.5 MB with every byte proven, or the decryption key to a larger one hosted anywhere (then only the key is proven). The buyer knows what they are getting before they pay.</p></div>
-              <div><span className="label">03</span><h3>Research</h3><p>Release findings to whoever pays, with proof that the text is exactly the one you committed to.</p></div>
-              <div><span className="label">04</span><h3>Digital goods</h3><p>Licence keys, access codes, files. Each copy has its own unlock key, so one sale never opens another.</p></div>
-            </div>
-          </div>
-        </section>
-
-        <section className="band" id="evidence">
-          <div className="wrap">
-            <div className="band-head">
-              <div>
-                <div className="label">Live testnet evidence</div>
-                <h2>Mined, not mocked.</h2>
-              </div>
-              <p>Real Zcash testnet transactions (NU7, v6, Ironwood pool) from the public records in the repository.</p>
-            </div>
-            <table className="evidence">
-              <thead><tr><th>What happened</th><th>Transaction id</th><th className="h">Block</th></tr></thead>
-              <tbody>
-                {EVIDENCE.map((e) => (
-                  <tr key={e.txid}>
-                    <td className="what"><b>{e.what}</b><span>{e.why}</span></td>
-                    <td><span className="txid">{e.txid}</span></td>
-                    <td className="h">{n(e.h)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="evnote">
-              Look any of these up on a Zcash testnet node or lightwalletd; <code>lintel-chain verify-witness --txid …</code> checks a transaction against live chain data.{' '}
-              <Link to="/docs/testnet-evidence">All records and how to reproduce them</Link>
-            </p>
-          </div>
-        </section>
-
-        <section className="band" id="stack">
-          <div className="wrap">
-            <div className="band-head">
-              <div>
-                <div className="label">Built on</div>
-                <h2>Shielded money, transparent setup, local compute.</h2>
-              </div>
-              <p>No new chain, no trusted setup, no server-side keys.</p>
-            </div>
-            <div className="stack">
-              <div><span className="label">Settlement</span><h3>Zcash Orchard · NU7</h3><p>The escrow is a shielded note in the Ironwood pool on the NU7 testnet, built as v6 transactions with RedPallas spend authorization, as in Orchard.</p></div>
-              <div><span className="label">Proofs</span><h3>Halo 2</h3><p>Proofs over the Pasta curves with IPA, so there is no trusted setup. A sealed-content proof is about 4.3 KB; verifying one in the browser takes about half a second.</p></div>
-              <div><span className="label">Runtime</span><h3>WASM in the browser</h3><p>The Rust engine compiles to WebAssembly and runs in a Web Worker. Proving, signing, transaction building and verification all happen on your device.</p></div>
+            <div className="uses three">
+              {USES.map(([h, p], i) => (
+                <div key={h}><span className="label">{String(i + 1).padStart(2, '0')}</span><h3>{h}</h3><p>{p}</p></div>
+              ))}
             </div>
           </div>
         </section>
@@ -241,10 +106,11 @@ export default function Landing() {
         <section className="closing">
           <div className="wrap">
             <div className="label">Try it on testnet</div>
-            <h2 className="display">Sealed until <em>settled</em>.</h2>
+            <h2 className="display">Pay only for what’s <em>proven</em>.</h2>
             <div className="ctas">
               <a className="btn solid" href="/app">Launch app</a>
               <Link className="btn ghost" to="/docs/quickstart">Quickstart</Link>
+              <Link className="btn ghost" to="/evidence">See the evidence</Link>
             </div>
           </div>
         </section>

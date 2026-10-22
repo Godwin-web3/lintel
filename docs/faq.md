@@ -21,11 +21,17 @@ Your app holds a refund the seller co-signed before you funded. Consensus reject
 **Does the relay see my file?**
 No. It stores the ciphertext and public session data. It can see escrow balances, not keys, `t` or plaintext. See [Security model](security-model.md).
 
+**How big can a listing be?**
+Up to 1,523,681 bytes (about 1.5 MB), and the decryption of every byte is proven. Files over 1,953 bytes (on-chain) or 7,905 bytes (multi-copy) are proven in 23.8 KB parts. See [Big payloads](big-payloads.md).
+
 **Why does sealing take a while?**
-The Halo 2 proof is generated in your browser so the secret never leaves it. Expect around 15 to 30 seconds for about 1 KB.
+The Halo 2 proofs are generated on your device so the secret never leaves it. Expect around 15 to 30 seconds for a small file in the browser. Big files take about 100 s per 23.8 KB part in a single-threaded browser tab, so over an hour for 1 MB; natively, 1 MB took 9.5 minutes on 2 vCPU.
+
+**Do I need a wallet in the browser to buy?**
+No. **Pay from another wallet** shows a ZIP 321 request you can pay from any Zcash testnet wallet, shielded or transparent. The app funds the escrow straight from that payment.
 
 **Do I need to keep the tab open?**
-As a seller, yes, until a buyer's on-chain payment settles. As a buyer with an open escrow, don't clear site data: your refund lives there.
+As a seller of an on-chain listing, either keep **My sales** open until the buyer's payment settles, or hand the listing to the seller agent (`lintel-agent`), which finishes the sale with your browser closed ([CLI reference](cli.md#lintel-agent-seller-agent)). Multi-copy sales complete the next time you open the app. As a buyer with an open escrow, don't clear site data: your refund lives there.
 
 **Can I run my own?**
 Yes. See [Self-hosting](self-hosting.md).

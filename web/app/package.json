@@ -13,7 +13,8 @@
     "test:ui": "node scripts/ui-test.mjs",
     "wasm:chain": "cd ../../wasm && wasm-pack build --release --target web --out-dir ../web/app/src/pkg-chain --out-name lintel_chain -- --features chain",
     "brand:sync": "node scripts/sync-brand.mjs",
-    "brand:check": "node scripts/sync-brand.mjs --check"
+    "brand:check": "node scripts/sync-brand.mjs --check",
+    "check:links": "node scripts/check-links.mjs"
   },
   "dependencies": {
     "marked": "^15.0.12",

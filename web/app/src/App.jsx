@@ -21,6 +21,9 @@ const go = (p) => (location.hash = p);
 // ---------- shared bits ----------
 const short = (h) => (h ? `${h.slice(0, 10)}…${h.slice(-6)}` : '');
 const fmtBytes = (n) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(2)} MB`);
+// Single-copy (v1) listings are the ones that settle on Zcash testnet, so they are priced in TAZ.
+// Multi-copy (v2) listings settle off-chain and move no coins; their price stays a ZEC figure.
+const unitFor = (l) => (l.version === 2 ? 'ZEC' : 'TAZ');
 export const Amt = ({ v, unit = 'ZEC', big }) => <span className={`amt${big ? ' big' : ''}`}>{v}<span className="unit">{unit}</span></span>;
 
 function Steps({ steps }) {
@@ -47,7 +50,7 @@ function Notice() {
         Proofs, adaptor signatures and decryption are real and run on this device. <b>Single-copy listings</b> can
         settle on Zcash testnet: escrow, time-locked refund and settlement are built, proven and checked in your
         browser, and the key is read from the mined transaction. <b>Multi-copy listings</b> still settle
-        off-chain: the completed signature goes through the relay and no ZEC moves.
+        off-chain: the completed signature goes through the relay and no coins move.
       </div>
     </div>
   );
@@ -140,7 +143,7 @@ function Market() {
           <a key={l.id} className={`card ${l.status}`} href={`#/listing/${l.id}`}>
             <div className="row title-row">
               <b>{l.title}</b>
-              <Amt v={l.price_zec} />
+              <Amt v={l.price_zec} unit={unitFor(l)} />
             </div>
             <p>{l.description || <span className="muted">No description</span>}</p>
             <div className="meta">
@@ -246,7 +249,7 @@ function Sell({ boot }) {
         <label><span className="label">Title</span><input required maxLength={120} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Critical bug report: Acme vault" /></label>
         <label><span className="label">Public description</span><textarea maxLength={2000} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What the buyer gets, without giving it away" /></label>
         <label><span className="label">Price ({form.onchain ? 'TAZ' : 'ZEC'})</span><input className="mono" required inputMode="decimal" pattern="\d{1,8}(\.\d{1,8})?" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0.5" /></label>
-        <label className="check"><input type="checkbox" checked={form.onchain} onChange={(e) => setForm({ ...form, onchain: e.target.checked })} /> <span><b>Settle on Zcash testnet.</b> One copy, priced in TAZ, up to {fmtBytes(max)}. Keep My sales open while a buyer pays: your app co-signs their refund and broadcasts the settlement.</span></label>
+        <label className="check"><input type="checkbox" checked={form.onchain} onChange={(e) => setForm({ ...form, onchain: e.target.checked })} /> <span><b>Settle on Zcash testnet.</b> One copy, priced in TAZ, up to {fmtBytes(max)}. Keep My sales open while a buyer pays, or hand the listing off to the seller agent from My sales: one of them co-signs the buyer’s refund and broadcasts the settlement.</span></label>
         {!form.onchain && <label><span className="label">Copies for sale</span><input className="mono" type="number" min={1} max={MAX_COPIES} value={form.copies} onChange={(e) => setForm({ ...form, copies: e.target.value })} /></label>}
         <label><span className="label">Secret content</span>
           <textarea className="mono" rows={6} disabled={!!file} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Paste the secret text here, or attach a file below" />
@@ -482,7 +485,7 @@ function Listing({ id, boot }) {
   return (
     <section className="narrow">
       <a href="#/" className="back">← Market</a>
-      <div className="row title-row"><h1>{L.title}</h1><Amt v={L.price_zec} big /></div>
+      <div className="row title-row"><h1>{L.title}</h1><Amt v={L.price_zec} unit={unitFor(L)} big /></div>
       {L.description && <p className="lede">{L.description}</p>}
       <dl className="facts">
         <dt>Sealed size</dt><dd className="mono">{fmtBytes(L.size)}{L.filename ? ` · ${L.filename}` : ''}</dd>
@@ -501,8 +504,8 @@ function Listing({ id, boot }) {
       </div>
 
       <Notice />
-      {isMine && <p className="muted">This is your listing. Keep <a href="#/mine">My sales</a> open to serve buyers.</p>}
-      {canBuy && <div className="actionbar"><button className="btn ghost" onClick={buy}>Buy off-chain demo (no ZEC moves)</button></div>}
+      {isMine && <p className="muted">This is your listing. Keep <a href="#/mine">My sales</a> open to serve buyers, or hand it off to the seller agent there.</p>}
+      {canBuy && <div className="actionbar"><button className="btn ghost" onClick={buy}>Buy off-chain demo (no coins move)</button></div>}
       {!isMine && !steps && verify.state === 'ok' && (L.status === 'open' || chainActive) && !result && (
         <OnchainBuy listing={L} verifiedT={verify.t} boot={boot} onDone={onchainDone} />
       )}

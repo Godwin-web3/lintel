@@ -30,13 +30,13 @@ Without Upstash, the relay falls back to a JSON file, which is wiped on every re
 | `MAX_BLOB` | `49152` | Largest single blob (one 23.8 KB part is 29,104 bytes) |
 | `LINTEL_LWD` | `https://testnet.zec.rocks:443` | lightwalletd endpoint for the chain proxy |
 
-Run locally: `cd web/relay && node server.js`, tests with `node --test`.
+Run locally: `cd web/relay && node server.js`, tests with `npm test` (`node --test`).
 
 ## App (Vercel)
 
 1. Import the repo into Vercel with **root directory `web/app`**. `vercel.json` runs `build.sh`, which builds the WASM engines, `params.bin` and `params-big.bin`, then the Vite app.
 2. Set `VITE_RELAY_URL` to your relay URL.
-3. Deploy. `vercel.json` sets the COOP/COEP and CSP headers the app needs; keep them.
+3. Deploy. `vercel.json` sets the COOP/COEP and CSP headers the app needs; keep them. It also rewrites every path except built assets to `index.html`, so `/how-it-works`, `/docs/…` and other deep links load.
 
 ### Build environment
 
@@ -48,6 +48,10 @@ Run locally: `cd web/relay && node server.js`, tests with `node --test`.
 | `LINTEL_NIGHTLY` | `nightly` | Nightly toolchain for the threaded build |
 
 Local development: `cd web/app && npm ci && npm run dev`, with a relay on `http://localhost:8787`.
+
+## Seller agent (optional)
+
+Sellers who want to close their browser during on-chain sales run `lintel-agent` on a machine they control (a laptop or a small VPS). It needs outbound HTTPS to your relay and to lightwalletd (`LINTEL_LWD`) and stores secrets in `LINTEL_AGENT_DIR` (default `~/.lintel-agent`). There is no hosted agent: it holds the listing's signing share and adaptor secret. Usage: [CLI reference](cli.md#lintel-agent-seller-agent).
 
 ## Fonts and CSP
 
