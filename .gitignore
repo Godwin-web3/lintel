@@ -1,3 +1,4 @@
 # device state dumps / wallet files from live runs: never commit
 *.SECRET.json
 *.secret.json
+*.SECRET.*

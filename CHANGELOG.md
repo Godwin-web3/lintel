@@ -4,6 +4,7 @@ All notable changes to Lintel. Dates are 2026.
 
 ## Unreleased
 
+- Seller agent (`lintel-agent`): finishes on-chain sales while the seller's browser is closed. Live testnet sale settled by the agent alone (funding 4,529,902, settlement 4,529,908).
 - Brand identity v1.0: trilithon mark, palette, Instrument Serif / Geist / Geist Mono, self-hosted fonts, brand kit in `brand/`.
 - Landing page at `/`, marketplace moved to `/app` (old links redirect), docs at `/docs`, 404 page, social cards and app icons.
 - Full documentation: quickstart, how it works, security model, architecture, self-hosting, CLI, FAQ, testnet evidence.

@@ -3,7 +3,7 @@ import { crypto, relay, store, randomHex, randomAlpha, sleep, RELAY } from './ap
 import { sellV2, startSellerAgent, MAX_COPIES } from './presale.js';
 import { ListingV2, SellerCardV2, Purchases, copiesLabel } from './Presale.jsx';
 import { WalletPanel, OnchainBuy } from './Onchain.jsx';
-import { advanceSeller } from './onchain.js';
+import { advanceSeller, wallet } from './onchain.js';
 import { Link, Lockup, NotFound, useTitle } from './site.jsx';
 
 // ---------- tiny hash router ----------
@@ -273,7 +273,10 @@ function Mine({ boot, agent = {} }) {
           try {
             const { listing, session } = await relay('GET', `/listings/${id}`);
             next[id] = { listing, session, note: '' };
-            if (session && session.mode === 'chain' && !busy.current.has(id)) {
+            if (session && session.mode === 'chain' && store.get().selling[id]?.delegated && !session.chain?.settle_txid) {
+              // the seller agent runs this sale; this tab only records the payout once it settles
+              next[id].note = 'Handed off: your seller agent is running this sale';
+            } else if (session && session.mode === 'chain' && !busy.current.has(id)) {
               busy.current.add(id);
               try { next[id].note = await advanceSeller(id, store.get().selling[id], listing, session); } catch (e) { next[id].note = e.message; }
               busy.current.delete(id);
@@ -306,6 +309,31 @@ function Mine({ boot, agent = {} }) {
     setMine(store.put((st) => delete st.selling[id]).selling);
   };
 
+  // Seller agent handoff (on-chain, single-copy listings). The file carries
+  // this listing's SECRET signing share and unlock secret, so whoever holds it
+  // can complete the sale. This tab stops acting on the listing first, so the
+  // agent and the tab never race on the same write-once relay fields.
+  const handOff = (id) => {
+    const w = wallet.get();
+    if (!w) return alert('Create or import a testnet wallet first: the agent pays the price to its address.');
+    if (busy.current.has(id)) return alert('This tab is in the middle of a step for this listing. Try again in a few seconds.');
+    if (!confirm('Download a handoff file for lintel-agent?\n\nIt contains this listing\'s secret keys: anyone with the file can complete the sale. Keep it on a machine you control and delete it after importing.\n\nThis tab stops running the sale once you hand it off.')) return;
+    const st = store.put((x) => { x.selling[id].delegated = true; });
+    const e = st.selling[id];
+    const file = { kind: 'lintel-agent-handoff', v: 1, relay: RELAY, listing_id: id, title: e.title, token: e.token,
+      state: e.state, payout_address: w.address, chain: e.chain || null };
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }));
+    a.download = `lintel-handoff-${id}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    setMine(st.selling);
+  };
+  const takeBack = (id) => {
+    if (!confirm('Run this sale in this tab again? Stop the agent for it first (lintel-agent remove ' + id + ').')) return;
+    setMine(store.put((x) => { delete x.selling[id].delegated; }).selling);
+  };
+
   const ids = Object.keys(mine);
   useTitle('My sales · Lintel');
   return (
@@ -317,7 +345,8 @@ function Mine({ boot, agent = {} }) {
           <p>
             Multi-copy listings complete on their own whenever this app is open on this device, on any app page.
             Buyers pre-sign right away; your next visit releases their keys. Single-copy and on-chain listings need
-            this page open while a buyer is paying.
+            this page open while a buyer is paying, unless you hand an on-chain listing off to the seller agent
+            (<code>lintel-agent</code>), which finishes the sale with this app closed.
           </p>
         </div>
       </div>
@@ -337,6 +366,8 @@ function Mine({ boot, agent = {} }) {
               {l?.note && <p className="small muted">{l.note}</p>}
               <div className="actions">
                 <a href={`#/listing/${id}`}>View listing</a>
+                {mine[id].onchain && !mine[id].delegated && !sess && <button className="link" onClick={() => handOff(id)}>Hand off to agent</button>}
+                {mine[id].delegated && (!sess || sess.chain?.settle_txid) && <button className="link" onClick={() => takeBack(id)}>Take back</button>}
                 <button className="link danger" onClick={() => forget(id)}>Forget keys</button>
               </div>
             </div>
