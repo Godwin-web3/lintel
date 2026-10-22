@@ -64,7 +64,7 @@ The signed refund lives only in that browser's local storage. Clearing site data
 
 ## Multi-copy listings (off-chain)
 
-Leave **Settle on Zcash testnet** unticked and choose a number of copies. Each copy is sealed with its own secret at listing time. Buyers can order while the seller is offline: they verify the proof and pre-sign immediately, and the sale completes the next time the seller opens the app on that device, on any app page. These listings move no ZEC: the completed signature is delivered through the relay. See [How it works](how-it-works.md#multi-copy-presale-listings).
+Leave **Settle on Zcash testnet** unticked and choose a number of copies. Each copy is sealed with its own secret at listing time. Buyers can order while the seller is offline: they verify the proof and pre-sign immediately, and the sale completes the next time the seller opens the app on that device, on any app page. These listings move no ZEC: the completed signature is delivered through the relay. See [How it works](how-it-works.md#6-multi-copy-presale-listings).
 
 ## Run it locally
 
