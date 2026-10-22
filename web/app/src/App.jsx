@@ -261,7 +261,7 @@ function Sell({ boot }) {
         </button>
       </form>
       {steps && <Steps steps={steps} />}
-      {busy && steps[0][1] === 'run' && <p className="muted small">Every byte's decryption is proven: each copy needs its own proofs, one per 23 KB part for files over 7.7 KB (about 10–40 s per part, depending on the device). Keep this tab open until listing finishes.</p>}
+      {busy && steps[0][1] === 'run' && <p className="muted small">Every byte's decryption is proven: each copy needs its own proofs, one per 23.8 KB part for larger files (about 100 s per part in a single-threaded tab, less with the threaded engine). Keep this tab open until listing finishes.</p>}
       {err && <p className="error" role="alert">{err}</p>}
     </section>
   );

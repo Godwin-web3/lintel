@@ -25,13 +25,16 @@ Without Upstash, the relay falls back to a JSON file, which is wiped on every re
 | `DATA_FILE` | `./data.json` | File storage path |
 | `MAX_LISTINGS` | `5000` | Listing cap |
 | `MAX_UNITS` | `20` | Copies per presale listing |
+| `BLOB_DIR` | `<DATA_FILE dir>/blobs` | Where big-offer blobs are stored with file storage (Upstash storage keeps them in Redis) |
+| `BLOB_QUOTA` | `2147483648` | Total blob bytes the relay accepts |
+| `MAX_BLOB` | `49152` | Largest single blob (one 23.8 KB part is 29,104 bytes) |
 | `LINTEL_LWD` | `https://testnet.zec.rocks:443` | lightwalletd endpoint for the chain proxy |
 
 Run locally: `cd web/relay && node server.js`, tests with `node --test`.
 
 ## App (Vercel)
 
-1. Import the repo into Vercel with **root directory `web/app`**. `vercel.json` runs `build.sh`, which builds the WASM engines and `params.bin`, then the Vite app.
+1. Import the repo into Vercel with **root directory `web/app`**. `vercel.json` runs `build.sh`, which builds the WASM engines, `params.bin` and `params-big.bin`, then the Vite app.
 2. Set `VITE_RELAY_URL` to your relay URL.
 3. Deploy. `vercel.json` sets the COOP/COEP and CSP headers the app needs; keep them.
 

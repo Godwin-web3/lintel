@@ -2,6 +2,7 @@
 // WASM calls and relay routes as the app. Run after `npm run wasm` in web/app:
 //   node web/e2e.mjs
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import init, * as L from './app/src/pkg/lintel_wasm.js';
 
@@ -147,6 +148,67 @@ try {
   const v2 = { v2_both_buyers_decrypted: outs.every(Boolean), v2_status: status2, v2_cross_unlock: cross || crossKey, v2_swapped_offer_unlocked: swapped, v2_relay_saw_secret: leaked2, v2_parts: JSON.parse(s1.unit.offer).parts.length, v2_seal_ms_single_thread_node: sealMs };
   console.log(JSON.stringify(v2));
   if (!v2.v2_both_buyers_decrypted || status2 !== 'sold' || cross || crossKey || swapped || leaked2 || v2.v2_parts !== 2) process.exitCode = 1;
+
+  // ---------- v3: big payload, blobs on the relay, manifest in the listing ----------
+  // Skip with LINTEL_E2E_BIG=0 (proving 3 parts single-threaded takes minutes).
+  if (process.env.LINTEL_E2E_BIG !== '0') {
+    const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
+    L.warmUpBigWithParams(fs.readFileSync(here('./app/public/params-big.bin')));
+    const big = new Uint8Array(60000);
+    for (let i = 0; i < big.length; i++) big[i] = (i * 131 + 17) & 255;
+    const m3 = new L.Merchant();
+    const sealer = m3.bigSealer(big);
+    const t3 = Date.now();
+    const blobs = [];
+    for (let j = 0; j < sealer.parts(); j++) blobs.push({ id: null, bytes: sealer.provePart(j) });
+    blobs.forEach((b, j) => { b.id = sealer.blobId(j); });
+    const sealMs3 = Date.now() - t3;
+    const put = async (id, bytes) => { await new Promise((r) => setTimeout(r, 20)); return (await fetch(`${base}/blobs/${id}`, { method: 'PUT', body: bytes })).status; };
+    // A tampered blob under its honest name is refused by the relay.
+    const tampered = Buffer.from(blobs[0].bytes); tampered[tampered.length - 1] ^= 1;
+    const tamperedPut = await put(blobs[0].id, tampered);
+    for (const b of blobs) if ((await put(b.id, b.bytes)) !== 200) throw new Error('blob upload failed');
+    const manifest = sealer.manifest();
+    const { listing: l3, seller_token: tok3 } = await call('POST', '/listings', {
+      title: 'Big dataset', price_zec: '0.5', content_hash: L.contentHashBig(big),
+      merchant_vk: m3.verificationKey(), t_point: m3.tPoint(), offer: manifest, size: big.length,
+    });
+    // buyer: manifest from the listing, blobs by content address, re-hashed
+    const { listing: pub3 } = await call('GET', `/listings/${l3.id}`);
+    const man = JSON.parse(pub3.offer);
+    const datas = [];
+    for (const p of man.parts) {
+      const b = Buffer.from(await (await fetch(`${base}/blobs/${p.blob}`)).arrayBuffer());
+      if (sha(b) !== p.blob) throw new Error('blob does not match its address');
+      datas.push(b.toString('hex'));
+    }
+    const offer3 = JSON.stringify({ ...man, parts: man.parts.map((p, i) => ({ ...p, data: datas[i] })) });
+    const p3 = new L.Payer();
+    const tv = Date.now();
+    const T3 = p3.verifyOffer(offer3, pub3.content_hash);
+    const verifyMs3 = Date.now() - tv;
+    // A swapped blob (another part's bytes) is refused before any proof runs.
+    let swappedBlob;
+    try { const w = JSON.parse(offer3); [w.parts[0].data, w.parts[1].data] = [w.parts[1].data, w.parts[0].data]; p3.verifyOffer(JSON.stringify(w), pub3.content_hash); swappedBlob = 'accepted'; } catch { swappedBlob = 'rejected'; }
+    const sh3 = rnd(32); const a3 = globalThis.crypto.getRandomValues(new Uint8Array(32)); a3[31] &= 3; const alpha3 = hex(a3);
+    const { session: ss3, buyer_token: bt3 } = await call('POST', `/listings/${l3.id}/sessions`, { payer_vk: p3.verificationKey(), r_a: p3.nonce(), alpha: alpha3, sighash: sh3 });
+    let s3 = (await call('GET', `/listings/${l3.id}`)).session;
+    await call('POST', `/sessions/${s3.id}/partial`, { partial: m3.partial(s3.r_a, s3.payer_vk, s3.alpha, Buffer.from(s3.sighash, 'hex')), merchant_pok: m3.proveKnowledge(s3.payer_vk, enc.encode(s3.id)) }, tok3);
+    s3 = (await call('GET', `/sessions/${ss3.id}`)).session;
+    const pre3 = p3.preSign(pub3.merchant_vk, s3.partial, Buffer.from(sh3, 'hex'), enc.encode(ss3.id), s3.merchant_pok, alpha3, T3);
+    await call('POST', `/sessions/${ss3.id}/presig`, { presig: pre3 }, bt3);
+    s3 = (await call('GET', `/sessions/${ss3.id}`)).session;
+    await call('POST', `/sessions/${ss3.id}/signature`, { signature: m3.complete(s3.presig, s3.partial) }, tok3);
+    s3 = (await call('GET', `/sessions/${ss3.id}`)).session;
+    const out3 = p3.unlock(s3.signature, pre3, s3.partial, offer3);
+    const v3 = {
+      v3_decrypted_ok: Buffer.from(out3).equals(Buffer.from(big)), v3_bytes: big.length, v3_parts: man.parts.length,
+      v3_manifest_bytes: pub3.offer.length, v3_tampered_blob_upload_status: tamperedPut, v3_swapped_blob: swappedBlob,
+      v3_seal_ms_single_thread_node: sealMs3, v3_verify_ms: verifyMs3,
+    };
+    console.log(JSON.stringify(v3));
+    if (!v3.v3_decrypted_ok || v3.v3_parts !== 3 || tamperedPut !== 422 || swappedBlob !== 'rejected' || T3 !== m3.tPoint()) process.exitCode = 1;
+  }
 } finally {
   relayProc.kill();
 }

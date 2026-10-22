@@ -47,6 +47,7 @@ flowchart LR
 | POST | `/sessions/:id/{partial,presig,signature,chain/:field}` | Write-once session fields |
 | POST, GET | `/listings/:id/units`, `/listings/:id/units/:i`, `/listings/:id/orders` | Presale copies and orders |
 | POST, GET | `/listings/:id/units/:i/orders`, `/orders/:id`, `/orders/:id/{complete,reject}` | Presale order lifecycle |
+| PUT, GET | `/blobs/:sha256` | Content-addressed blobs for big (v3) offers: one part's ciphertext + proof each, refused unless the bytes hash to the name |
 | GET | `/chain/height`, `/chain/tree/:h`, `/chain/cmxs/:h`, `/chain/tx/:txid` | Public chain data |
 | POST | `/chain/broadcast` | Broadcast a fully signed transaction |
 
@@ -54,6 +55,6 @@ flowchart LR
 
 - Proving parameters (`params.bin`) are 524,356 bytes and pinned by digest.
 - Sealing about 1 KB: about 28 s single-threaded, about 15 s with two threads (`LINTEL_THREADS=1` build). Verification is under a second.
-- Payload caps: 1,953 bytes per single proof, 7,905 bytes for a multi-proof presale copy.
+- Payload caps: 1,953 bytes per single proof, 7,905 bytes for a multi-proof presale copy, 1,523,681 bytes for a big (v3) offer of up to 64 proofs at k = 15 (second pinned file `params-big.bin`, 2,097,220 bytes). A 23.8 KB v3 part proves in 13.3 s natively (2 vCPU) and about 100 s in single-threaded WASM; see [Big payloads](big-payloads.md).
 
 See [Presale, relay and proving](relay-perf.md) and [On-chain settlement](onchain.md) for full measurements.

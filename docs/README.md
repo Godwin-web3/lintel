@@ -18,7 +18,7 @@ Proving, signing, transaction building and verification all run in the browser (
 | --- | --- | --- |
 | Settles | On Zcash testnet (escrow, refund, settlement) or as an off-chain demo | Off-chain: the completed signature goes through the relay, no ZEC moves |
 | Copies | 1 | Up to 10 from the Sell form (20 per listing on the relay), each with its own secret |
-| Payload | Up to 1,953 bytes (one proof) | Up to 7,905 bytes (up to four proofs per copy) |
+| Payload | Up to 1.5 MB (1,523,681 bytes): one proof up to 1,953 bytes, then one proof per 23.8 KB part | Up to 1.5 MB: up to four small proofs up to 7,905 bytes, then one proof per 23.8 KB part |
 | Seller online? | Yes, while a buyer pays on chain | No: buyers order while the seller is away; the sale completes the next time the seller's app is open |
 
 ## Where to go next
@@ -31,7 +31,7 @@ Proving, signing, transaction building and verification all run in the browser (
 - [CLI reference](cli.md): `lintel-cli` and `lintel-chain`.
 - [FAQ](faq.md) and [Testnet evidence](testnet-evidence.md).
 
-Deep dives: [On-chain settlement](onchain.md) (full design notes and test record) and [Presale, relay and proving](relay-perf.md).
+Deep dives: [On-chain settlement](onchain.md) (full design notes and test record), [Presale, relay and proving](relay-perf.md) and [Big payloads](big-payloads.md) (offer v3: proven 23.8 KB parts, rate-2 keystream, content-addressed blobs, benchmarks).
 
 ## Live deployment
 

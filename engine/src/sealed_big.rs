@@ -416,6 +416,8 @@ pub fn seal_parallel<const N: usize>(keys: &prove::Keys<N>, s: F, payload: &[u8]
     let sealer = Sealer::<N>::new(s, payload)?;
     let n = sealer.parts();
     let threads = threads.clamp(1, n);
+    #[cfg(target_arch = "wasm32")]
+    let _ = threads;
     #[cfg(not(target_arch = "wasm32"))]
     if threads > 1 {
         use std::sync::{atomic::{AtomicUsize, Ordering}, Mutex};

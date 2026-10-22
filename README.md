@@ -81,7 +81,7 @@ Self-host the relay (Render + Upstash) and app (Vercel): [docs/self-hosting.md](
 
 ## Status and limits
 
-Working on testnet today: single-copy listings with on-chain escrow, settlement and time-locked refund; multi-copy presale listings (settled off-chain for now); payloads up to 7,905 bytes; optional multithreaded proving.
+Working on testnet today: single-copy listings with on-chain escrow, settlement and time-locked refund; multi-copy presale listings (settled off-chain for now); payloads up to about 1.5 MB (1,523,681 bytes) with every byte's decryption proven, larger ones in 23.8 KB proven parts whose ciphertext and proofs the relay stores by content address ([big payloads](docs/big-payloads.md)); optional multithreaded proving.
 
 Not yet: mainnet, an audit, on-chain presale settlement, a background agent so sellers needn't stay online, and a full wallet. Details in the [security model](docs/security-model.md#known-limits).
 

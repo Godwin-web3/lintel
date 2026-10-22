@@ -49,6 +49,7 @@ Public inputs are `[T.x, T.y, h, c_0 … c_63]`. The buyer runs `verify_offer` a
 | --- | --- |
 | Payload per proof | up to 1,953 bytes (64 chunks of 31 bytes; chunk 0 holds the length) |
 | Larger payloads | up to 4 proofs bound to the same `t` with a public keystream offset each, 7,905 bytes (`sealed_multi.rs`) |
+| Big payloads | up to 64 proofs of 768 elements (23,808 bytes) each at k = 15 with a rate-2 Poseidon keystream, 1,523,681 bytes; ciphertext and proofs in SHA-256-named relay blobs (`sealed_big.rs`, [Big payloads](big-payloads.md)) |
 | Proof size | about 4.3 KB |
 | Proving | about 3.3 s natively on a laptop-class CPU; 15 to 30 s in a browser |
 | Verifying | about 0.5 s in a browser |
