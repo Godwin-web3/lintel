@@ -1,5 +1,10 @@
 # Relay persistence, seller-offline sales, multi-copy listings, threaded proving
 
+> This note covers multi-copy (presale) listings, relay storage and threaded proving. For
+> on-chain single-copy listings, the seller agent covers the seller-offline case
+> ([On-chain settlement](onchain.md#seller-agent-browser-closed)); payloads above 7,905 bytes
+> use offer v3 ([Big payloads](big-payloads.md)).
+
 Branch `app-relay-perf`. Scope: `web/relay`, the seller/presale side of
 `web/app`, two new engine modules (`presale.rs`, `sealed_multi.rs`) and their
 WASM bindings (`wasm/src/v2.rs`, `wasm/src/threads.rs`). `protocol.rs`,

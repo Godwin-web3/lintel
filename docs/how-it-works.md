@@ -51,7 +51,7 @@ Public inputs are `[T.x, T.y, h, c_0 … c_63]`. The buyer runs `verify_offer` a
 | Larger payloads | up to 4 proofs bound to the same `t` with a public keystream offset each, 7,905 bytes (`sealed_multi.rs`) |
 | Big payloads | up to 64 proofs of 768 elements (23,808 bytes) each at k = 15 with a rate-2 Poseidon keystream, 1,523,681 bytes; ciphertext and proofs in SHA-256-named relay blobs (`sealed_big.rs`, [Big payloads](big-payloads.md)) |
 | Proof size | about 4.3 KB |
-| Proving | about 3.3 s natively on a laptop-class CPU; 15 to 30 s in a browser |
+| Proving | about 3.3 s per small proof natively; 15 to 30 s in a browser. A 23.8 KB v3 part: 13.3 s natively on 2 vCPU, about 100 s in a single-threaded browser tab |
 | Verifying | about 0.5 s in a browser |
 | Setup | none trusted: Halo 2 with IPA over the Pasta curves |
 
@@ -82,6 +82,8 @@ For single-copy listings, the signature above authorizes a real Zcash testnet sp
 7. The buyer fetches the mined settlement, finds the signature by its agreed nonce commitment `R`, verifies `(R, s)` under its own `rk` and sighash, extracts `t` and decrypts.
 
 Because the buyer verifies the signature it extracts, the source of the transaction bytes does not need to be trusted. In the on-chain flow the relay only ever sees the settlement txid, never a completed signature.
+
+**Who runs each side.** The seller's steps (co-signing the refund, building, signing, proving and broadcasting the settlement) run in the seller's open app, or in the seller agent `lintel-agent`, which imports a handoff file from the app and runs the same checks natively ([CLI reference](cli.md#lintel-agent-seller-agent)). The buyer funds from the in-browser wallet, or pays a ZIP 321 request from any testnet wallet to a per-purchase pay-in wallet, transparent or shielded; the escrow is then funded straight from that payment ([details](onchain.md#pay-from-another-wallet)).
 
 ## 5. The time-locked refund (v2)
 

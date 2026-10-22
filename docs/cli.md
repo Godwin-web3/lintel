@@ -1,6 +1,6 @@
 # CLI reference
 
-The engine ships three binaries. Build from `engine/` with a recent stable Rust toolchain.
+The engine ships four binaries. Build from `engine/` with a recent stable Rust toolchain; built binaries land in `../target/release` (or `$CARGO_TARGET_DIR/release`).
 
 ## `lintel-cli`
 
@@ -33,6 +33,30 @@ Needs the `net` feature: `cargo run --release --features net --bin lintel-chain 
 | `verify-witness --txid X` | Diagnostic, no keys: rebuild the witness of every Ironwood output of a mined tx and check it against the chain's tree root |
 
 `engine/examples/testnet_sale.rs` (`--features net`) runs the whole on-chain sale and refund. See [On-chain settlement](onchain.md).
+
+## `lintel-agent` (seller agent)
+
+Finishes your on-chain sales while the app is closed. Needs the `agent` feature:
+
+```sh
+cargo build --release --features agent --bin lintel-agent
+```
+
+| Command | Purpose |
+| --- | --- |
+| `import <handoff.json> [--dir DIR] [--force]` | Check a handoff file against the relay (`T` and the merchant key must match the listing) and store it |
+| `run [--dir DIR] [--interval SECS] [--once]` | Advance every stored listing until stopped (default every 10 s, minimum 2) |
+| `status [--dir DIR]` | Show each stored listing's stage |
+| `remove <listing-id> [--dir DIR]` | Stop handling a listing and delete its secrets here |
+
+The handoff file comes from **Hand off to agent** on a single-copy on-chain listing in the app's **My sales**. For each listing the agent checks the buyer's key proof, binds the escrow key, co-signs the time-locked refund, builds the settlement once the funding is mined, then signs, proves and broadcasts it, re-running every check the seller's app makes. Payouts go to the address in the handoff file (your app wallet); the agent holds no wallet spending key.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `LINTEL_AGENT_DIR` | `~/.lintel-agent` | Where imported listings are stored (`--dir` overrides) |
+| `LINTEL_LWD` | `https://testnet.zec.rocks:443` | lightwalletd endpoint; the agent reads chain data directly, not through the relay |
+
+The handoff file and the agent directory hold secrets: anyone with them can complete the sale. Keep them on a machine you control. To take a sale back into the browser, stop the agent for it first (`lintel-agent remove <id>`), then choose **Take back** in **My sales**. A live run is recorded in [On-chain settlement](onchain.md#seller-agent-browser-closed).
 
 ## `lintel-inject` (legacy)
 
