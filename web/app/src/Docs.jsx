@@ -93,10 +93,10 @@ export default function Docs({ slug }) {
           <h4>Source</h4>
           <ul><li><a href={`${GITHUB}/blob/main/docs/${page[2]}`} rel="noreferrer">Edit this page on GitHub</a></li></ul>
         </nav>
-        <main id="content" style={{ padding: 0, minWidth: 0 }}>
+        <main id="content">
           <div className="docnav-mobile">
             <label className="label" htmlFor="docpick">Docs page</label>
-            <select id="docpick" value={slug} onChange={(e) => navigate(routeFor(e.target.value))} style={{ marginTop: 8 }}>
+            <select id="docpick" value={slug} onChange={(e) => navigate(routeFor(e.target.value))}>
               {NAV.map(([group, items]) => (
                 <optgroup key={group} label={group}>
                   {items.map(([s, label]) => <option key={s} value={s}>{label}</option>)}
@@ -107,7 +107,7 @@ export default function Docs({ slug }) {
           <Prose md={md} key={slug} />
           <nav className="docfoot prose" aria-label="Previous and next page">
             {prev ? <Link to={routeFor(prev[0])}><span className="label">Previous</span>{prev[1]}</Link> : <span />}
-            {next ? <Link to={routeFor(next[0])} style={{ textAlign: 'right' }}><span className="label">Next</span>{next[1]}</Link> : <span />}
+            {next ? <Link to={routeFor(next[0])} className="next"><span className="label">Next</span>{next[1]}</Link> : <span />}
           </nav>
         </main>
       </div>

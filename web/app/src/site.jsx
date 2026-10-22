@@ -55,15 +55,9 @@ export function useTitle(title) {
   useEffect(() => { document.title = title; }, [title]);
 }
 
-/** The trilithon: amber beam over two bone posts, on the 96-unit grid. */
-export function Mark({ size = 24, beam = 'var(--amber)', post = 'var(--bone)', title }) {
-  return (
-    <svg width={size} height={size} viewBox="8 14 80 72" role={title ? 'img' : undefined} aria-hidden={title ? undefined : true} aria-label={title}>
-      <rect x="8" y="14" width="80" height="17" fill={beam} />
-      <rect x="17" y="37" width="21" height="49" fill={post} />
-      <rect x="58" y="37" width="21" height="49" fill={post} />
-    </svg>
-  );
+/** The mark, from the brand kit (brand/logo/lintel-mark-dark.svg). Never recolored. */
+export function Mark({ size = 24, title }) {
+  return <img className="mark" src="/brand/lintel-mark-dark.svg" width={size} height={size} alt={title || ''} aria-hidden={title ? undefined : true} />;
 }
 
 export function Lockup({ height = 32 }) {
@@ -130,7 +124,7 @@ export function NotFound({ inApp = false }) {
   const body = (
     <div className="notfound" id="content">
       <div>
-        <Mark size={72} beam="var(--slate)" />
+        <Mark size={72} />
         <div className="label">404 · Nothing at this address</div>
         <h1 className="display">No door here.</h1>
         <p>The page you asked for does not exist, or it moved when the marketplace went to <code>/app</code>.</p>
@@ -145,7 +139,7 @@ export function NotFound({ inApp = false }) {
   return (
     <div className="site">
       <SiteHeader />
-      <main style={{ padding: 0, display: 'flex' }} className="wrap">{body}</main>
+      <main className="wrap notfound-main">{body}</main>
       <SiteFooter />
     </div>
   );
