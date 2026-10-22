@@ -197,6 +197,20 @@ decrypted content matched the listing's content hash. Records:
 [`testnet/evidence-payin-transparent-sale.json`](testnet/evidence-payin-transparent-sale.json),
 [`testnet/evidence-payin-shielded-sale.json`](testnet/evidence-payin-shielded-sale.json).
 
+**The app's own code, live.** `web/app/scripts/payin-live.mjs` bundles `src/onchain.js` unchanged
+and runs it in Node on the same wasm32 engine the browser loads (`npm run wasm:chain`), against the
+local relay. A request was paid twice by the stand-in wallet (155,000 zats to the P2PKH receiver,
+`d8ff66e2…c65380` at 4,530,059; 100,000 zats to the Orchard receiver as an Ironwood note,
+`41159c47…b90e3` at 4,530,065); `payin.scan` found both (the note by compact trial decryption);
+`payin.withdraw` built one transaction spending the note and the coin in WASM (RedPallas +
+secp256k1 signatures, Halo 2 proof), the node accepted it and it was mined
+(`27fb27295b437a87c00297d1146581894ceb1c1f08343817589a723ae5ede9e4` at 4,530,080); a rescan then
+showed the note spent (by nullifier) and no coins. Record:
+[`testnet/evidence-payin-wasm-app-code.json`](testnet/evidence-payin-wasm-app-code.json). The
+pay-in panel and Wallet page were also rendered in headless Chromium from the production build;
+the QR codes decode to the exact ZIP 321 URIs. A full browser purchase through the pay-in panel
+(both browsers driven by UI) was not run.
+
 An earlier attempt the same day (listing `V9sgRpyJ7aVx`) also completed on chain (payment
 `4e0d2f44ee5f8c343cc6d88fbd28df9f8b7a634e2e76d425bd38ee674803ffa2` at 4,529,968, funding
 `81c48b508af5b95d578fb949930c21f2f6caeda8e3b62a28c88bb51ff705a43e` at 4,529,969, settlement
