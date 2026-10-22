@@ -13,18 +13,29 @@
 // verified (unlock refuses a re-served unit that differs); the signing share and nonce are
 // dropped inside the worker right after pre-signing.
 
-import { crypto, relay, store, randomHex, randomAlpha, sleep } from './api.js';
+import { crypto, relay, store, randomHex, randomAlpha, sleep, putBlobs, resolveUnit } from './api.js';
 
 export const MAX_COPIES = 10;
+// Above this many bytes a copy is sealed as offer v3 (big parts at k = 15,
+// ciphertext + proofs in content-addressed relay blobs). Same as maxPayloadV2().
+export const V2_MAX = 7905;
+
+/** Seals one copy (v2 inline, or v3 with its blobs uploaded). `onPart({ part, parts, ms })`. */
+async function sealCopy(payload, onPart) {
+  if (payload.length <= V2_MAX) return crypto('sealUnit', { payload });
+  const r = await crypto('sealUnitBig', { payload }, onPart);
+  await putBlobs(r.blobs, (done, total) => onPart({ uploaded: done, blobs: total }));
+  return r;
+}
 
 // ---------- seller ----------
 
 /** Seals `copies` units and publishes them. `onStep(i, n, ms)` reports progress. */
-export async function sellV2({ payload, copies, meta, onStep = () => {} }) {
+export async function sellV2({ payload, copies, meta, onStep = () => {}, onPart = () => {} }) {
   let listing = null, token = null;
   for (let i = 0; i < copies; i++) {
     const t0 = performance.now();
-    const { unit, secret, contentHash } = await crypto('sealUnit', { payload });
+    const { unit, secret, contentHash } = await sealCopy(payload, (p) => onPart(i + 1, copies, p));
     // Keep the secret before publishing: a published unit without its secret
     // could take an order nobody can complete.
     const keep = (lid) => store.put((st) => {
@@ -47,15 +58,15 @@ export async function sellV2({ payload, copies, meta, onStep = () => {} }) {
 }
 
 /** Adds copies to an existing listing. The content must hash to the listing's hash. */
-export async function addCopies({ listingId, payload, copies, onStep = () => {} }) {
+export async function addCopies({ listingId, payload, copies, onStep = () => {}, onPart = () => {} }) {
   const mine = store.get().selling[listingId];
   if (!mine || mine.v !== 2) throw new Error('seller keys for this listing are not on this device');
   const { listing } = await relay('GET', `/listings/${listingId}`);
-  const h = await crypto('contentHashV2', { payload });
+  const h = await crypto(payload.length > V2_MAX ? 'contentHashBig' : 'contentHashV2', { payload });
   if (h !== listing.content_hash) throw new Error('this content does not match the listing (different hash)');
   for (let i = 0; i < copies; i++) {
     const t0 = performance.now();
-    const { unit, secret } = await crypto('sealUnit', { payload });
+    const { unit, secret } = await sealCopy(payload, (p) => onPart(i + 1, copies, p));
     store.put((st) => { st.selling[listingId].units[unit.r_b] = { secret }; });
     await relay('POST', `/listings/${listingId}/units`, { unit }, mine.token);
     onStep(i + 1, copies, Math.round(performance.now() - t0));
@@ -141,7 +152,7 @@ export async function verifyListing(listing) {
   const open = listing.units.find((u) => u.state === 'open') || listing.units[0];
   const { unit } = await relay('GET', `/listings/${listing.id}/units/${open.index}`);
   const t0 = performance.now();
-  await crypto('verifyUnit', { unit: JSON.stringify(unit), contentHash: listing.content_hash });
+  await crypto('verifyUnit', { unit: JSON.stringify(await resolveUnit(unit)), contentHash: listing.content_hash });
   return { ms: Math.round(performance.now() - t0), parts: JSON.parse(unit.offer).parts.length };
 }
 
@@ -157,7 +168,7 @@ export async function orderV2(listing) {
     if (unit.state !== 'open') continue;
     const sighash = randomHex(32), alpha = randomAlpha(); // placeholders until PCZT supplies them
     // Fresh signing share and nonce per attempt, so a refused order never reuses one.
-    const { order, keep } = await crypto('buyerOrder', { unit: JSON.stringify(unit), contentHash: listing.content_hash, alpha, sighash });
+    const { order, keep } = await crypto('buyerOrder', { unit: JSON.stringify(await resolveUnit(unit)), contentHash: listing.content_hash, alpha, sighash });
     try {
       const r = await relay('POST', `/listings/${listing.id}/units/${idx}/orders`, order);
       const p = { listingId: listing.id, title: listing.title, filename: listing.filename, unit: idx, token: r.buyer_token, keep, order, id: r.order.id };
@@ -182,7 +193,7 @@ export async function awaitUnlock(p, { onStatus = () => {}, signal } = {}) {
     if (order.status === 'complete') {
       const { unit } = await relay('GET', `/listings/${p.listingId}/units/${p.unit}`);
       const bytes = await crypto('buyerUnlock', {
-        keep: p.keep, unit: JSON.stringify(unit), order: JSON.stringify(p.order),
+        keep: p.keep, unit: JSON.stringify(await resolveUnit(unit)), order: JSON.stringify(p.order),
         completion: JSON.stringify({ signature: order.signature, enc_sb: order.enc_sb }),
       });
       store.put((st) => { st.buying2[p.id].unlocked = true; });

@@ -132,7 +132,8 @@ export function SellerCardV2({ id, entry, agent, onForget, boot }) {
     setAdding({ note: 'Sealing…' });
     try {
       const payload = form.file ? new Uint8Array(await form.file.arrayBuffer()) : new TextEncoder().encode(form.text);
-      await addCopies({ listingId: id, payload, copies: Number(form.copies), onStep: (i, n, ms) => setAdding({ note: `Sealed copy ${i}/${n} in ${(ms / 1000).toFixed(1)}s` }) });
+      await addCopies({ listingId: id, payload, copies: Number(form.copies), onStep: (i, n, ms) => setAdding({ note: `Sealed copy ${i}/${n} in ${(ms / 1000).toFixed(1)}s` }),
+        onPart: (i, n, p) => setAdding({ note: p.uploaded !== undefined ? `Copy ${i}/${n}: uploading parts ${p.uploaded}/${p.blobs}` : `Copy ${i}/${n}: part ${p.part}/${p.parts} proven` }) });
       setAdding({ note: 'Added.', done: true });
     } catch (e2) { setAdding({ error: e2.message }); }
   }

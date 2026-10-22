@@ -34,7 +34,7 @@
       ]
     },
     {
-      "source": "/params.bin",
+      "source": "/(params|params-big).bin",
       "headers": [
         {
           "key": "Cache-Control",

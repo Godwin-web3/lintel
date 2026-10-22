@@ -2,6 +2,7 @@ node_modules/
 dist/
 src/pkg/
 public/params.bin
+public/params-big.bin
 .env*
 public/pkg-mt/
 src/pkg-chain/

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "wasm": "cd ../../wasm && wasm-pack build --release --target web --out-dir ../web/app/src/pkg && cd ../engine && cargo run --release --no-default-features --example dump_params -- ../web/app/public/params.bin",
+    "wasm": "cd ../../wasm && wasm-pack build --release --target web --out-dir ../web/app/src/pkg && cd ../engine && cargo run --release --no-default-features --example dump_params -- ../web/app/public/params.bin && cargo run --release --no-default-features --example dump_params -- ../web/app/public/params-big.bin big",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
