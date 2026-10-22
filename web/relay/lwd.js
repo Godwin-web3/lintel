@@ -58,6 +58,36 @@ export function decodeCompactBlockCmxs(buf) {
   }
   return { height: b[2]?.[0] ?? 0, cmxs };
 }
+/** Ironwood compact actions of one CompactBlock: txs with at least one action, in block order. */
+export function decodeCompactBlockActions(buf) {
+  const b = decodeFields(buf);
+  const height = b[2]?.[0] ?? 0;
+  const vtx = (b[7] || []).map((t) => decodeFields(t)).map((t) => ({ index: t[1]?.[0] ?? 0, txid: t[2]?.[0], actions: t[9] || [] }));
+  vtx.sort((x, y) => x.index - y.index);
+  const txs = [];
+  for (const t of vtx) {
+    if (!t.actions.length) continue;
+    if (!t.txid || t.txid.length !== 32) throw new Error('bad txid in compact block');
+    const actions = t.actions.map((a) => {
+      const f = decodeFields(a);
+      const [nf, cmx, epk, ct] = [f[1]?.[0], f[2]?.[0], f[3]?.[0], f[4]?.[0]];
+      if (nf?.length !== 32 || cmx?.length !== 32 || epk?.length !== 32 || ct?.length !== 52) throw new Error('bad compact action');
+      return { nf: nf.toString('hex'), cmx: cmx.toString('hex'), epk: epk.toString('hex'), ct: ct.toString('hex') };
+    });
+    txs.push({ height, txid: Buffer.from(t.txid).reverse().toString('hex'), actions });
+  }
+  return txs;
+}
+/** GetAddressUtxosReplyList -> [{ txid, vout, value, height }] (txid in display order). */
+export function decodeUtxos(buf) {
+  const f = decodeFields(buf);
+  return (f[1] || []).map((u) => {
+    const g = decodeFields(u);
+    const txid = g[1]?.[0];
+    if (!txid || txid.length !== 32) throw new Error('bad utxo txid');
+    return { txid: Buffer.from(txid).reverse().toString('hex'), vout: g[2]?.[0] ?? 0, value: g[4]?.[0] ?? 0, height: g[5]?.[0] ?? 0 };
+  });
+}
 export function decodeSendResponse(buf) {
   const f = decodeFields(buf);
   let code = f[1]?.[0] ?? 0;
@@ -129,6 +159,20 @@ export async function blockCmxs(height, opts) {
   const cmxs = [];
   for (const m of msgs) cmxs.push(...decodeCompactBlockCmxs(m).cmxs);
   return { height, cmxs };
+}
+/** Ironwood compact actions of blocks from..to (inclusive). */
+export async function compactRange(from, to, opts) {
+  const q = Buffer.concat([fBytes(1, fVarint(1, from)), fBytes(2, fVarint(1, to)), fVarint(3, POOL_IRONWOOD)]);
+  const msgs = await grpc('GetBlockRange', q, opts);
+  const txs = [];
+  for (const m of msgs) txs.push(...decodeCompactBlockActions(m));
+  return { from, to, txs };
+}
+/** Mined transparent coins of a t-address (as the server reports them; clients re-check each against the raw tx). */
+export async function addressUtxos(taddr, opts) {
+  const q = Buffer.concat([fBytes(1, Buffer.from(taddr)), fVarint(2, 0), fVarint(3, 0)]);
+  const msgs = await grpc('GetAddressUtxos', q, opts);
+  return { address: taddr, utxos: msgs.flatMap((m) => decodeUtxos(m)) };
 }
 export async function sendTx(rawHex, opts) {
   const [m] = await grpc('SendTransaction', fBytes(1, Buffer.from(rawHex, 'hex')), opts);

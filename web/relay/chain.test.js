@@ -11,6 +11,8 @@ function vi(n) { const o = []; while (n > 127) { o.push((n % 128) | 128); n = Ma
 const frame = (m) => { const f = Buffer.concat([Buffer.alloc(5), m]); f.writeUInt32BE(m.length, 1); return f; };
 
 const cmx = (c) => Buffer.alloc(32, c);
+// first length-delimited field of a request (the address of GetAddressUtxosArg)
+const decodeFirst = (b) => { let i = 1, n = 0, m = 1, x; do { x = b[i++]; n += (x & 127) * m; m *= 128; } while (x & 128); return b.subarray(i, i + n).toString(); };
 const sent = [];
 const fake = http2.createServer();
 fake.on('stream', (stream, headers) => {
@@ -24,10 +26,18 @@ fake.on('stream', (stream, headers) => {
     if (method === 'GetTreeState') out = [Buffer.concat([enc(1, Buffer.from('test')), encV(2, 4000), enc(7, Buffer.from('01ab'))])];
     if (method === 'GetBlockRange') {
       // two txs out of order; actions must come back sorted by tx index
-      const act = (c) => enc(9, Buffer.concat([enc(1, Buffer.alloc(32)), enc(2, cmx(c))]));
-      const tx1 = enc(7, Buffer.concat([encV(1, 1), act(3)]));
-      const tx0 = enc(7, Buffer.concat([encV(1, 0), act(1), act(2)]));
-      out = [Buffer.concat([encV(2, 4001), tx1, tx0])];
+      // real lightwalletd compact actions carry nullifier, cmx, ephemeral key, 52-byte ciphertext
+      const act = (c) => enc(9, Buffer.concat([enc(1, Buffer.alloc(32)), enc(2, cmx(c)), enc(3, Buffer.alloc(32, 0xe0 + c)), enc(4, Buffer.alloc(52, c))]));
+      const tx1 = enc(7, Buffer.concat([encV(1, 1), enc(2, Buffer.alloc(32, 0x11)), act(3)]));
+      const tx0 = enc(7, Buffer.concat([encV(1, 0), enc(2, Buffer.alloc(32, 0x10)), act(1), act(2)]));
+      const txT = enc(7, Buffer.concat([encV(1, 2), enc(2, Buffer.alloc(32, 0x12))])); // transparent-only tx: no actions
+      out = [Buffer.concat([encV(2, 4001), tx1, tx0, txT])];
+    }
+    if (method === 'GetAddressUtxos') {
+      const addr = decodeFirst(req);
+      const txid = Buffer.alloc(32); txid[0] = 0xab; // protocol order: displayed reversed
+      const u = (vout, value) => enc(1, Buffer.concat([enc(1, txid), ...(vout ? [encV(2, vout)] : []), enc(3, Buffer.from('76a914' + '00'.repeat(20) + '88ac', 'hex')), encV(4, value), encV(5, 4000), enc(6, Buffer.from(addr))]));
+      out = [Buffer.concat([u(0, 2055000), u(3, 20000)])];
     }
     if (method === 'SendTransaction') {
       sent.push(req);
@@ -70,6 +80,23 @@ test('chain proxy: height, tree, ordered block commitments, broadcast', async ()
   assert.equal(no.accepted, false, 'a node error message means rejected even with error_code 0');
   assert.match(no.error_message, /locked until/);
   assert.equal(sent.length, 3);
+});
+
+test('pay-in detection: transparent coins and Ironwood compact actions', async () => {
+  const taddr = 'tmXi4socqXL9bvpsGpVUVUEGngUSAey2yCE';
+  const u = (await call('GET', `/chain/utxos/${taddr}`)).json;
+  assert.equal(u.address, taddr);
+  assert.deepEqual(u.utxos, [
+    { txid: '00'.repeat(31) + 'ab', vout: 0, value: 2055000, height: 4000 },
+    { txid: '00'.repeat(31) + 'ab', vout: 3, value: 20000, height: 4000 },
+  ]);
+  assert.equal((await call('GET', '/chain/utxos/utest1abc')).status, 404, 'only testnet P2PKH addresses');
+  const c = (await call('GET', '/chain/compact/4001/4001')).json;
+  assert.equal(c.txs.length, 2, 'transactions without Ironwood actions are skipped');
+  assert.deepEqual(c.txs.map((t) => t.txid), ['10'.repeat(32), '11'.repeat(32)], 'block order, display txids');
+  assert.deepEqual(c.txs[0].actions[1], { nf: '00'.repeat(32), cmx: cmx(2).toString('hex'), epk: 'e2'.repeat(32), ct: '02'.repeat(52) });
+  assert.equal((await call('GET', '/chain/compact/4001/4200')).status, 400, 'at most 100 blocks per call');
+  assert.equal((await call('GET', '/chain/compact/4002/4001')).status, 400);
 });
 
 test('chain-mode session: no nonce up front, settlement round gated, no relay signature', async () => {

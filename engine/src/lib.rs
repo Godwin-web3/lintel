@@ -5,6 +5,8 @@ pub mod service;
 mod spend_auth_g;
 #[cfg(feature = "chain")]
 pub mod chain;
+#[cfg(feature = "chain")]
+pub mod payin;
 #[cfg(feature = "net")]
 pub mod agent;
 #[cfg(feature = "net")]

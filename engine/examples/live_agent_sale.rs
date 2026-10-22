@@ -36,6 +36,7 @@ use ff::PrimeField;
 use group::GroupEncoding;
 use lintel::agent::{self, MerchantState, SETTLE_FEE};
 use lintel::chain::{self, NoteRecord, RefundLock, SpendTerms, TransparentKey, TransparentOut};
+use lintel::payin::{self, AnchorData, PayOut, PayinPlan, Utxo};
 use lintel::lwd::Lwd;
 use lintel::protocol::{self, parse_scalar, Seller as Payer};
 use lintel::sealed;
@@ -142,7 +143,7 @@ async fn broadcast(l: &Lwd, raw: Vec<u8>, txid: &str) -> Result<()> {
     Ok(())
 }
 
-async fn buyer(dir: &str, relay_url: &str) -> Result<()> {
+async fn buyer(dir: &str, relay_url: &str, payin_mode: bool) -> Result<()> {
     let relay = Relay::new(relay_url)?;
     let rd = |f: &str| fs::read(format!("{dir}/{f}")).with_context(|| format!("read {dir}/{f}"));
     let wr = |f: &str, b: &[u8]| fs::write(format!("{dir}/{f}"), b).with_context(|| format!("write {dir}/{f}"));
@@ -150,14 +151,20 @@ async fn buyer(dir: &str, relay_url: &str) -> Result<()> {
     let lid = info["listing_id"].as_str().unwrap().to_string();
     let l = Lwd::connect().await?;
 
-    let w: Value = serde_json::from_slice(&rd("payer-wallet.json")?)?;
-    let sk = Option::<SpendingKey>::from(SpendingKey::from_bytes(hex::decode(w["sk"].as_str().unwrap())?.try_into().unwrap())).unwrap();
+    // Device wallet (default) or the per-purchase pay-in wallet ("pay from another wallet").
+    let (sk, tkey, mut src) = if payin_mode {
+        let k: Value = serde_json::from_slice(&rd("payin.SECRET.json")?)?;
+        (spending_key(k["sk"].as_str().unwrap())?, TransparentKey::from_bytes(hex::decode(k["tsk"].as_str().unwrap())?.try_into().unwrap())?, None)
+    } else {
+        let w: Value = serde_json::from_slice(&rd("payer-wallet.json")?)?;
+        let tkey = TransparentKey::random(); // fresh t-address per sale, as the app does
+        wr("payer-tkey.SECRET.json", json!({ "tsk": hex::encode(tkey.to_bytes()) }).to_string().as_bytes())?;
+        let src: NoteRecord = serde_json::from_slice(&rd("payer-source-note.json")?)?;
+        (spending_key(w["sk"].as_str().unwrap())?, tkey, Some(src))
+    };
     let fvk = FullViewingKey::from(&sk);
     let ua = chain::encode_ua(&fvk.address_at(0u32, Scope::External));
-    let tkey = TransparentKey::random(); // fresh t-address per sale, as the app does
-    wr("payer-tkey.SECRET.json", json!({ "tsk": hex::encode(tkey.to_bytes()) }).to_string().as_bytes())?;
-    let mut src: NoteRecord = serde_json::from_slice(&rd("payer-source-note.json")?)?;
-    if src.height == 0 { src.height = l.wait_mined(&src.txid, STEP_TIMEOUT_SECS).await?.1; }
+    if let Some(s) = src.as_mut() { if s.height == 0 { s.height = l.wait_mined(&s.txid, STEP_TIMEOUT_SECS).await?.1; } }
 
     // ---- the listing, and its offer proof (as the app's Market page does)
     let r = relay.get(&format!("/listings/{lid}")).await?;
@@ -165,7 +172,10 @@ async fn buyer(dir: &str, relay_url: &str) -> Result<()> {
     ensure!(r["session"].is_null() && listing["status"] == "open", "listing is not open");
     let price = agent::zats(listing["price_zec"].as_str().unwrap())?;
     let escrow_value = price + 2 * SETTLE_FEE;
-    ensure!(src.value >= escrow_value + LOCK_VALUE + 15_000, "source note too small");
+    if let Some(src) = &src { ensure!(src.value >= escrow_value + LOCK_VALUE + 15_000, "source note too small"); }
+    // pay-in: wait for the external wallet's payment BEFORE opening a session
+    // (the app does the same, so a slow payment never holds the seller up)
+    let paid = if payin_mode { Some(detect_payment(&l, dir, &fvk, &tkey, escrow_value).await?) } else { None };
     let keys = sealed::prove::setup::<{ sealed::CHUNKS }>().map_err(|e| anyhow!("{e:?}"))?;
     let offer = sealed::SealedOffer::from_wire(&serde_json::from_str(listing["offer"].as_str().unwrap())?).ok_or_else(|| anyhow!("bad offer"))?;
     let t_listing = protocol::parse_point(listing["t_point"].as_str().unwrap()).ok_or_else(|| anyhow!("bad T"))?;
@@ -207,11 +217,27 @@ async fn buyer(dir: &str, relay_url: &str) -> Result<()> {
     let fund_terms = SpendTerms { kind: "fund".into(), pay_to: jv["escrow_address"].as_str().unwrap().into(), amount: escrow_value,
         change_to: Some(ua.clone()), target_height: tip + 1, expiry_height: tip + 40, lock: None,
         t_out: Some(TransparentOut { address: tkey.address(), value: LOCK_VALUE }) };
-    let src_note = src.note()?;
-    let p = chain::build_spend(&fvk, &src_note, &fund_terms)?;
-    let idx = chain::spend_index(&p, &fvk, &src_note)?;
-    let p = chain::sign_own(p, &sk)?;
-    let (fund_raw, fund_txid) = l.finalize(p, src.height, &hex::decode(&src.cmx)?.try_into().unwrap(), idx).await?;
+    let (fund_raw, fund_txid) = match (&src, &paid) {
+        (Some(src), _) => {
+            let src_note = src.note()?;
+            let p = chain::build_spend(&fvk, &src_note, &fund_terms)?;
+            let idx = chain::spend_index(&p, &fvk, &src_note)?;
+            let p = chain::sign_own(p, &sk)?;
+            l.finalize(p, src.height, &hex::decode(&src.cmx)?.try_into().unwrap(), idx).await?
+        }
+        (None, Some(paid)) => {
+            // pay-in: the escrow + the lock coin (vout 0) straight from what the external wallet paid
+            let plan = PayinPlan { note: paid.note.clone(), utxos: paid.utxos.clone(),
+                outputs: vec![PayOut { to: fund_terms.pay_to.clone(), value: escrow_value }, PayOut { to: tkey.address(), value: LOCK_VALUE }],
+                change_to: Some(ua.clone()), target_height: tip + 1, expiry_height: tip + 40 };
+            let anchor = anchor_data(&l, plan.note.as_ref(), tip).await?;
+            let b = payin::build(&sk, &tkey, &plan, &anchor)?;
+            log("B3-payin", json!({ "inputs": { "ironwood_note": plan.note.as_ref().map(|n| format!("{}#{}", n.txid, n.action_index)),
+                "transparent": plan.utxos.iter().map(|u| format!("{}:{}", u.txid, u.vout)).collect::<Vec<_>>() }, "fee": b.fee, "change": b.change }));
+            (hex::decode(&b.raw)?, b.txid)
+        }
+        _ => unreachable!(),
+    };
     let found = chain::find_notes(&fund_raw, tip + 1, &jfvk)?;
     let mut escrow = NoteRecord::from_found(found.first().ok_or_else(|| anyhow!("funding does not create the escrow note"))?, &fund_txid, 0);
     ensure!(escrow.value == escrow_value, "escrow value");
@@ -316,21 +342,156 @@ async fn buyer(dir: &str, relay_url: &str) -> Result<()> {
         "buyer": { "offer_proof_verified": true, "t_recovered_from_mined_tx": true, "decrypted_matches_content_hash": hash_ok,
             "decrypted_bytes_match_sealed_payload": bytes_ok, "content_hash": listing["content_hash"] },
         "relay_saw_signature": !final_session["signature"].is_null(), "listing_status_after": final_listing["status"],
+        "funding_source": match &paid {
+            None => json!({ "kind": "device wallet (Ironwood note)" }),
+            Some(p) => json!({ "kind": "pay from another wallet: per-purchase pay-in wallet funded by a ZIP 321 payment",
+                "request": p.request, "payment": p.payment, "detected": p.detected,
+                "funding_inputs": { "ironwood_note": p.note.as_ref().map(|n| json!({ "txid": n.txid, "height": n.height, "value": n.value })),
+                    "transparent": p.utxos }, "separate_sweep_tx": false }),
+        },
     });
     wr("evidence-agent-sale.json", serde_json::to_string_pretty(&evidence)?.as_bytes())?;
     println!("{}", serde_json::to_string_pretty(&evidence)?);
     Ok(())
 }
 
+
+// ---------------------------------------------------------------- pay from another wallet
+
+fn spending_key(h: &str) -> Result<SpendingKey> {
+    Option::<SpendingKey>::from(SpendingKey::from_bytes(hex::decode(h)?.try_into().map_err(|_| anyhow!("sk length"))?)).ok_or_else(|| anyhow!("invalid spending key"))
+}
+
+/// Anchor (and witness data) for a pay-in build: the note's own block, or the tip.
+async fn anchor_data(l: &Lwd, note: Option<&NoteRecord>, tip: u32) -> Result<AnchorData> {
+    Ok(match note {
+        Some(n) => AnchorData { prev_tree: l.tree(n.height - 1).await?.ironwood_tree, block_cmxs: l.block_cmxs(n.height).await?.iter().map(hex::encode).collect(),
+            at_tree: l.tree(n.height).await?.ironwood_tree },
+        None => AnchorData { at_tree: l.tree(tip).await?.ironwood_tree, ..Default::default() },
+    })
+}
+
+/// `payin-request`: the buyer's app opens a fresh pay-in wallet for this
+/// purchase (keys stored BEFORE the address is shown) and shows a ZIP 321
+/// request for escrow + lock coin + funding fee.
+async fn payin_request(dir: &str, relay_url: &str) -> Result<()> {
+    let relay = Relay::new(relay_url)?;
+    let info: Value = serde_json::from_slice(&fs::read(format!("{dir}/listing.json"))?)?;
+    let lid = info["listing_id"].as_str().unwrap();
+    let listing = relay.get(&format!("/listings/{lid}")).await?["listing"].clone();
+    let price = agent::zats(listing["price_zec"].as_str().unwrap())?;
+    let amount = payin::payin_amount(price + 2 * SETTLE_FEE);
+    let (sk, skb) = loop { let b: [u8; 32] = rand::random(); if let Some(k) = Option::<SpendingKey>::from(SpendingKey::from_bytes(b)) { break (k, b); } };
+    let tkey = TransparentKey::random();
+    let p = format!("{dir}/payin.SECRET.json");
+    ensure!(fs::metadata(&p).is_err(), "{p} exists: refusing to overwrite a pay-in wallet that may hold funds");
+    fs::write(&p, json!({ "sk": hex::encode(skb), "tsk": hex::encode(tkey.to_bytes()) }).to_string())?;
+    let addr = FullViewingKey::from(&sk).address_at(0u32, Scope::External);
+    let ua = payin::payment_ua(&addr, &tkey.pubkey_hash());
+    let start = Lwd::connect().await?.latest().await?;
+    let req = json!({ "listing_id": lid, "amount_zats": amount, "uri": payin::zip321_uri(&ua, amount, Some(&format!("Lintel escrow {lid}"))),
+        "uri_transparent": payin::zip321_uri(&tkey.address(), amount, Some(&format!("Lintel escrow {lid}"))),
+        "payment_ua": ua, "orchard_ua": chain::encode_ua(&addr), "taddr": tkey.address(), "start_height": start });
+    fs::write(format!("{dir}/payin-request.json"), serde_json::to_string_pretty(&req)?)?;
+    log("payin-request", req);
+    Ok(())
+}
+
+/// `external-pay`: stands in for an external wallet. It reads ONLY the ZIP 321
+/// URI, picks the requested receiver from the address, and pays the amount from
+/// the throwaway wallet in <dir> (payer-wallet.json + payer-change-note.json),
+/// a key the pay-in wallet knows nothing about.
+async fn external_pay(dir: &str, pool: &str) -> Result<()> {
+    let req: Value = serde_json::from_slice(&fs::read(format!("{dir}/payin-request.json"))?)?;
+    let (addr, amount) = payin::parse_zip321(req["uri"].as_str().unwrap())?;
+    let r = payin::receivers(&addr)?;
+    let to = match pool {
+        "transparent" => chain::encode_taddr(&r.p2pkh.ok_or_else(|| anyhow!("no P2PKH receiver"))?),
+        "orchard" => chain::encode_ua(&Option::from(orchard::Address::from_raw_address_bytes(&r.orchard.ok_or_else(|| anyhow!("no Orchard receiver"))?)).ok_or_else(|| anyhow!("bad receiver"))?),
+        _ => bail!("pool must be transparent or orchard"),
+    };
+    let w: Value = serde_json::from_slice(&fs::read(format!("{dir}/payer-wallet.json"))?)?;
+    let sk = spending_key(w["sk"].as_str().unwrap())?;
+    let ext_ua = chain::encode_ua(&FullViewingKey::from(&sk).address_at(0u32, Scope::External));
+    let note: NoteRecord = serde_json::from_slice(&fs::read(format!("{dir}/payer-change-note.json"))?)?;
+    let l = Lwd::connect().await?;
+    let tip = l.latest().await?;
+    let plan = PayinPlan { note: Some(note.clone()), utxos: vec![], outputs: vec![PayOut { to: to.clone(), value: amount }],
+        change_to: Some(ext_ua), target_height: tip + 1, expiry_height: tip + 40 };
+    let b = payin::build(&sk, &TransparentKey::random(), &plan, &anchor_data(&l, Some(&note), tip).await?)?;
+    broadcast(&l, hex::decode(&b.raw)?, &b.txid).await?;
+    log("external-pay", json!({ "broadcast": b.txid, "to": to, "amount": amount, "fee": b.fee }));
+    let (raw, h) = l.wait_mined(&b.txid, STEP_TIMEOUT_SECS).await?;
+    // keep the external wallet's change spendable for later runs
+    fs::copy(format!("{dir}/payer-change-note.json"), format!("{dir}/payer-change-note.prev.json"))?;
+    if let Some(c) = chain::find_notes(&raw, h, &FullViewingKey::from(&sk))?.into_iter().next() {
+        fs::write(format!("{dir}/payer-change-note.json"), serde_json::to_string_pretty(&NoteRecord::from_found(&c, &b.txid, h))?)?;
+    }
+    let rec = json!({ "txid": b.txid, "height": h, "pool": pool, "paid_to": to, "amount_zats": amount, "fee": b.fee,
+        "spent_note": format!("{}#{}", note.txid, note.action_index) });
+    fs::write(format!("{dir}/ext-payment.json"), serde_json::to_string_pretty(&rec)?)?;
+    log("external-pay", rec);
+    Ok(())
+}
+
+struct Paid { note: Option<NoteRecord>, utxos: Vec<Utxo>, request: Value, payment: Value, detected: Value }
+
+/// Watches the pay-in wallet the way the app does: mined coins of its
+/// t-address (GetAddressUtxos, each re-checked against the raw tx) and
+/// Ironwood notes (compact blocks trial-decrypted, then the full tx).
+async fn detect_payment(l: &Lwd, dir: &str, fvk: &FullViewingKey, tkey: &TransparentKey, escrow_value: u64) -> Result<Paid> {
+    let req: Value = serde_json::from_slice(&fs::read(format!("{dir}/payin-request.json"))?)?;
+    let start_h = req["start_height"].as_u64().unwrap() as u32;
+    let taddr = tkey.address();
+    ensure!(req["taddr"].as_str() == Some(taddr.as_str()), "payin-request.json does not belong to payin.SECRET.json");
+    let ua = chain::encode_ua(&fvk.address_at(0u32, Scope::External));
+    let outputs = vec![PayOut { to: ua.clone(), value: escrow_value }, PayOut { to: taddr.clone(), value: LOCK_VALUE }];
+    let t0 = std::time::Instant::now();
+    let mut scanned = start_h.saturating_sub(1);
+    let mut notes: Vec<NoteRecord> = Vec::new();
+    loop {
+        let tip = l.latest().await?;
+        let mut utxos = Vec::new();
+        for (txid, vout, _, h) in l.address_utxos(&taddr).await? {
+            let raw = l.tx(&txid).await?;
+            utxos.push(payin::utxo_from_tx(&raw.data, h, &txid, vout, &taddr)?);
+        }
+        if tip > scanned {
+            for (h, txid, acts) in l.compact_range(scanned + 1, tip).await? {
+                if payin::scan_compact(fvk, &acts)?.is_empty() { continue; }
+                let raw = l.tx(&txid).await?;
+                for f in chain::find_notes(&raw.data, h, fvk)? {
+                    let r = NoteRecord::from_found(&f, &txid, h);
+                    if !notes.iter().any(|n| n.cmx == r.cmx) { notes.push(r); }
+                }
+            }
+            scanned = tip;
+        }
+        match payin::select(&notes, &utxos, &outputs) {
+            Ok((note, coins)) => {
+                let detected = json!({ "tip": tip, "scanned_from": start_h, "ironwood_notes": notes.len(), "transparent_coins": utxos.len(), "after_secs": t0.elapsed().as_secs() });
+                log("payin-detected", detected.clone());
+                let payment: Value = fs::read(format!("{dir}/ext-payment.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
+                return Ok(Paid { note, utxos: coins, request: req, payment, detected });
+            }
+            Err(e) => log("payin-wait", json!({ "tip": tip, "status": e.to_string() })),
+        }
+        ensure!(t0.elapsed().as_secs() < STEP_TIMEOUT_SECS, "no payment detected");
+        tokio::time::sleep(Duration::from_secs(15)).await;
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let (Some(dir), Some(role), Some(relay)) = (a.first(), a.get(1), a.get(2)) else {
-        bail!("usage: live_agent_sale <dir> (seller|buyer) <relay-url>")
+        bail!("usage: live_agent_sale <dir> (seller|buyer [payin]|payin-request|external-pay <transparent|orchard>) <relay-url|pool>")
     };
     match role.as_str() {
         "seller" => seller(dir, relay).await,
-        "buyer" => buyer(dir, relay).await,
+        "buyer" => buyer(dir, relay, a.get(3).map(String::as_str) == Some("payin")).await,
+        "payin-request" => payin_request(dir, relay).await,
+        "external-pay" => external_pay(dir, relay).await,
         _ => bail!("role must be seller or buyer"),
     }
 }

@@ -34,7 +34,7 @@ halo2_gadgets = "0.6"
 # Same pasta 0.6 / ff 0.14 stack as the engine, so scalars and points are shared types.
 orchard = { version = "0.16", optional = true, default-features = false, features = ["circuit", "std"] }
 pczt = { version = "=0.10.0-pre.2", optional = true, features = ["orchard", "signer", "prover", "io-finalizer", "tx-extractor", "zcp-builder", "spend-finalizer"] }
-zcash_primitives = { version = "=0.31.0-pre.2", optional = true, default-features = false, features = ["std", "circuits"] }
+zcash_primitives = { version = "=0.31.0-pre.2", optional = true, default-features = false, features = ["std", "circuits", "transparent-inputs"] }
 zcash_protocol = { version = "=0.11.0-pre.1", optional = true }
 zcash_address = { version = "=0.14.0-pre.2", optional = true }
 incrementalmerkletree = { version = "0.9", optional = true, features = ["legacy-api"] }
