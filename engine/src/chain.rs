@@ -687,7 +687,7 @@ pub fn spend_index(pczt: &Pczt, fvk: &FullViewingKey, note: &Note) -> Result<usi
 fn b32h(h: &str) -> Result<[u8; 32]> { hex::decode(h)?.try_into().map_err(|_| anyhow!("expected 32 bytes")) }
 
 /// An escrow (or wallet) note as found on chain. Public to its two owners.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct NoteRecord { pub txid: String, pub height: u32, pub action_index: usize, pub cmx: String, pub recipient: String, pub value: u64, pub rho: String, pub rseed: String }
 
 impl NoteRecord {

@@ -13,6 +13,7 @@
 
 use anyhow::{anyhow, ensure, Context, Result};
 use lintel::chain::{self, JointKeyInfo, NoteRecord, SpendTerms, TransparentKey};
+use lintel::payin;
 use orchard::keys::{FullViewingKey, Scope, SpendingKey};
 use serde::Deserialize;
 use serde_json::json;
@@ -138,6 +139,56 @@ pub fn is_final_at(raw_hex: &str, parse_height: u32, height: u32) -> Result<bool
     Ok(chain::is_final(&*tx, height))
 }
 
+
+// ------------------------------------------------------------ pay from another wallet (pay-in wallet)
+
+/// A fresh per-purchase pay-in wallet: one Ironwood key and one transparent
+/// key (both SECRET, device-local), the UA an external wallet pays (Orchard
+/// receiver -> Ironwood note, P2PKH receiver -> transparent coin), the
+/// Orchard-only UA (refund / change target) and the bare t-address.
+pub fn payin_new() -> Result<String> {
+    let w: serde_json::Value = serde_json::from_str(&new_spending_key()?)?;
+    let sk = w["sk"].as_str().unwrap().to_string();
+    let tk = TransparentKey::random();
+    let addr = FullViewingKey::from(&spending_key(&sk)?).address_at(0u32, Scope::External);
+    Ok(json!({ "sk": sk, "tsk": hex::encode(tk.to_bytes()), "payment_ua": payin::payment_ua(&addr, &tk.pubkey_hash()),
+        "orchard_ua": w["address"], "taddr": tk.address() }).to_string())
+}
+/// Nullifier of a note owned by `key` (to see it spent in a later block's compact actions).
+pub fn note_nullifier(key: &str, note_json: &str) -> Result<String> {
+    Ok(hex::encode(note(note_json)?.note()?.nullifier(&fvk_of(key)?).to_bytes()))
+}
+pub fn zip321(address: &str, zats: u64, message: &str) -> String { payin::zip321_uri(address, zats, Some(message)) }
+pub fn utxo_from_tx(raw_hex: &str, height: u32, txid: &str, vout: u32, taddr: &str) -> Result<String> {
+    Ok(serde_json::to_string(&payin::utxo_from_tx(&hex::decode(raw_hex).context("tx hex")?, height, txid, vout, taddr)?)?)
+}
+pub fn utxos_in_tx(raw_hex: &str, height: u32, taddr: &str) -> Result<String> {
+    Ok(serde_json::to_string(&payin::utxos_in_tx(&hex::decode(raw_hex).context("tx hex")?, height, taddr)?)?)
+}
+/// Indices of compact Ironwood actions (`[{nf,cmx,epk,ct}]`) paying `sk`'s address.
+pub fn scan_compact(sk_hex: &str, acts_json: &str) -> Result<String> {
+    let acts: Vec<payin::CompactAct> = serde_json::from_str(acts_json).context("compact actions json")?;
+    Ok(serde_json::to_string(&payin::scan_compact(&FullViewingKey::from(&spending_key(sk_hex)?), &acts)?)?)
+}
+pub fn payin_select(notes_json: &str, utxos_json: &str, outputs_json: &str) -> Result<String> {
+    let notes: Vec<NoteRecord> = serde_json::from_str(notes_json).context("notes json")?;
+    let utxos: Vec<payin::Utxo> = serde_json::from_str(utxos_json).context("utxos json")?;
+    let outs: Vec<payin::PayOut> = serde_json::from_str(outputs_json).context("outputs json")?;
+    let (note, utxos) = payin::select(&notes, &utxos, &outs)?;
+    Ok(json!({ "note": note, "utxos": utxos }).to_string())
+}
+pub fn payin_balance(plan_json: &str) -> Result<String> {
+    let (input, fee, change) = payin::plan_balance(&serde_json::from_str(plan_json).context("plan json")?)?;
+    Ok(json!({ "input": input, "fee": fee, "change": change }).to_string())
+}
+/// Builds, signs, proves and fully verifies a pay-in transaction (funding an
+/// escrow, or sweeping the pay-in wallet out). Returns `{raw, txid, fee, change}`.
+pub fn payin_build(sk_hex: &str, tsk_hex: &str, plan_json: &str, anchor_json: &str) -> Result<String> {
+    let plan: payin::PayinPlan = serde_json::from_str(plan_json).context("plan json")?;
+    let anchor: payin::AnchorData = serde_json::from_str(anchor_json).context("anchor json")?;
+    Ok(serde_json::to_string(&payin::build(&spending_key(sk_hex)?, &TransparentKey::from_bytes(h32(tsk_hex)?)?, &plan, &anchor)?)?)
+}
+
 // ------------------------------------------------------------ wasm exports
 
 #[wasm_bindgen(js_name = chainNewSpendingKey)]
@@ -178,6 +229,28 @@ pub fn w_refund_payout(note_value: f64) -> f64 { chain::refund_payout(note_value
 pub fn w_fee(ironwood_actions: usize, t_in: usize, t_out: usize) -> f64 { chain::zip317_fee(ironwood_actions, t_in, t_out) as f64 }
 #[wasm_bindgen(js_name = chainLockUtxoValue)]
 pub fn w_lock_value() -> f64 { chain::LOCK_UTXO_VALUE as f64 }
+#[wasm_bindgen(js_name = chainPayinNew)]
+pub fn w_payin_new() -> R<String> { payin_new().map_err(e) }
+#[wasm_bindgen(js_name = chainZip321)]
+pub fn w_zip321(address: &str, zats: f64, message: &str) -> String { zip321(address, zats as u64, message) }
+#[wasm_bindgen(js_name = chainNoteNullifier)]
+pub fn w_note_nullifier(key: &str, note: &str) -> R<String> { note_nullifier(key, note).map_err(e) }
+#[wasm_bindgen(js_name = chainPayinFee)]
+pub fn w_payin_fee(notes: usize, utxos: usize, ironwood_outputs: usize, t_outputs: usize) -> f64 { payin::plan_fee(notes, utxos, ironwood_outputs, t_outputs) as f64 }
+#[wasm_bindgen(js_name = chainPayinAmount)]
+pub fn w_payin_amount(escrow: f64) -> f64 { payin::payin_amount(escrow as u64) as f64 }
+#[wasm_bindgen(js_name = chainUtxoFromTx)]
+pub fn w_utxo_from_tx(raw: &str, height: u32, txid: &str, vout: u32, taddr: &str) -> R<String> { utxo_from_tx(raw, height, txid, vout, taddr).map_err(e) }
+#[wasm_bindgen(js_name = chainUtxosInTx)]
+pub fn w_utxos_in_tx(raw: &str, height: u32, taddr: &str) -> R<String> { utxos_in_tx(raw, height, taddr).map_err(e) }
+#[wasm_bindgen(js_name = chainScanCompact)]
+pub fn w_scan_compact(sk: &str, acts: &str) -> R<String> { scan_compact(sk, acts).map_err(e) }
+#[wasm_bindgen(js_name = chainPayinSelect)]
+pub fn w_payin_select(notes: &str, utxos: &str, outputs: &str) -> R<String> { payin_select(notes, utxos, outputs).map_err(e) }
+#[wasm_bindgen(js_name = chainPayinBalance)]
+pub fn w_payin_balance(plan: &str) -> R<String> { payin_balance(plan).map_err(e) }
+#[wasm_bindgen(js_name = chainPayinBuild)]
+pub fn w_payin_build(sk: &str, tsk: &str, plan: &str, anchor: &str) -> R<String> { payin_build(sk, tsk, plan, anchor).map_err(e) }
 /// Builds the Ironwood proving key now (slow, ~seconds) so the first proof does not.
 #[wasm_bindgen(js_name = chainWarmUp)]
 pub fn w_warm_up() {
@@ -341,5 +414,62 @@ mod tests {
         // merchant got paid exactly the price
         let got: Vec<Value> = serde_json::from_str(&find_notes(&merchant_own, settled["raw"].as_str().unwrap(), TARGET, "x").unwrap()).unwrap();
         assert_eq!(got.iter().map(|n| n["value"].as_u64().unwrap()).sum::<u64>(), PRICE);
+    }
+
+    #[test]
+    fn payin_bindings_detect_and_fund_offline() {
+        // pay-in wallet + ZIP 321 request
+        let p = v(&payin_new().unwrap());
+        let (psk, ptsk, taddr, orchard_ua) = (p["sk"].as_str().unwrap(), p["tsk"].as_str().unwrap(), p["taddr"].as_str().unwrap(), p["orchard_ua"].as_str().unwrap());
+        assert_eq!(transparent_address(ptsk).unwrap(), taddr);
+        let escrow_value = 220_000u64;
+        let need = payin::payin_amount(escrow_value);
+        let uri = zip321(p["payment_ua"].as_str().unwrap(), need, "Lintel escrow");
+        assert!(uri.starts_with("zcash:utest1") && uri.contains("amount=0.00255&"), "{uri}");
+
+        // an external wallet pays the transparent receiver, and another payment pays the Orchard receiver
+        let ext = v(&new_spending_key().unwrap());
+        let (esk, eua) = (ext["sk"].as_str().unwrap(), ext["address"].as_str().unwrap());
+        let src = source_note(esk, 3_000_000);
+        let anchor = json!({ "prev_tree": "", "block_cmxs": [src.cmx], "at_tree": tree_hex(&[src.cmx.clone()]) }).to_string();
+        let plan = |to: &str| json!({ "note": src, "utxos": [], "outputs": [{ "to": to, "value": need }], "change_to": eua,
+            "target_height": TARGET, "expiry_height": TARGET + 20 }).to_string();
+        let tk = v(&new_transparent_key().unwrap());
+        let pay_t = v(&payin_build(esk, tk["tsk"].as_str().unwrap(), &plan(taddr), &anchor).unwrap());
+        let pay_z = v(&payin_build(esk, tk["tsk"].as_str().unwrap(), &plan(orchard_ua), &anchor).unwrap());
+        let (raw_t, txid_t) = (pay_t["raw"].as_str().unwrap(), pay_t["txid"].as_str().unwrap());
+
+        // detection
+        let coins: Vec<Value> = serde_json::from_str(&utxos_in_tx(raw_t, TARGET, taddr).unwrap()).unwrap();
+        assert_eq!(coins.len(), 1);
+        assert_eq!(coins[0]["value"].as_u64().unwrap(), need);
+        assert_eq!(v(&utxo_from_tx(raw_t, TARGET, txid_t, coins[0]["vout"].as_u64().unwrap() as u32, taddr).unwrap()), coins[0]);
+        let compact = |raw: &str| -> String {
+            let tx = chain::parse_tx(&hex::decode(raw).unwrap(), TARGET).unwrap();
+            serde_json::to_string(&tx.ironwood_bundle().unwrap().actions().iter().map(|a| json!({
+                "nf": hex::encode(a.nullifier().to_bytes()), "cmx": hex::encode(a.cmx().to_bytes()),
+                "epk": hex::encode(a.encrypted_note().epk_bytes), "ct": hex::encode(&a.encrypted_note().enc_ciphertext.as_ref()[..52]) })).collect::<Vec<_>>()).unwrap()
+        };
+        assert_eq!(v(&scan_compact(psk, &compact(raw_t)).unwrap()), json!([]));
+        let hits = v(&scan_compact(psk, &compact(pay_z["raw"].as_str().unwrap())).unwrap());
+        assert_eq!(hits.as_array().unwrap().len(), 1);
+
+        // fund an escrow from the coin: escrow note + lock coin at vout 0
+        let mut merchant = Merchant::new();
+        let mut payer = Payer::new();
+        let ak = v(&payer.bind_joint(&merchant.verification_key()).unwrap())["ak"].as_str().unwrap().to_string();
+        let _ = merchant.bind_joint(&payer.verification_key()).unwrap();
+        let j = joint(&ak, b"payin", &hex::encode([1u8; 32]), &hex::encode([2u8; 32])).unwrap();
+        let outs = json!([{ "to": v(&j)["escrow_address"], "value": escrow_value }, { "to": taddr, "value": chain::LOCK_UTXO_VALUE }]).to_string();
+        let sel = v(&payin_select("[]", &serde_json::to_string(&coins).unwrap(), &outs).unwrap());
+        let fplan = json!({ "note": sel["note"], "utxos": sel["utxos"], "outputs": serde_json::from_str::<Value>(&outs).unwrap(),
+            "change_to": orchard_ua, "target_height": TARGET + 1, "expiry_height": TARGET + 40 }).to_string();
+        assert_eq!(v(&payin_balance(&fplan).unwrap()), json!({ "input": need, "fee": 15_000, "change": 0 }));
+        let all: Vec<String> = [vec![src.cmx.clone()], tx_cmxs(raw_t)].concat();
+        let fund = v(&payin_build(psk, ptsk, &fplan, &json!({ "at_tree": tree_hex(&all) }).to_string()).unwrap());
+        let fraw = fund["raw"].as_str().unwrap();
+        let esc: Vec<Value> = serde_json::from_str(&find_notes(&j, fraw, TARGET, fund["txid"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(esc[0]["value"].as_u64().unwrap(), escrow_value);
+        assert_eq!(v(&utxo_from_tx(fraw, TARGET, fund["txid"].as_str().unwrap(), 0, taddr).unwrap())["value"].as_u64().unwrap(), chain::LOCK_UTXO_VALUE);
     }
 }

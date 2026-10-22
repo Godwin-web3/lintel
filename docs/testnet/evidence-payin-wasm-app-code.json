@@ -1,0 +1,38 @@
+{
+  "network": "testnet",
+  "what": "the app's own pay-in code (web/app/src/onchain.js `payin.open/scan/withdraw`) run in Node via web/app/scripts/payin-live.mjs, with the wasm32 on-chain engine built by `npm run wasm:chain` (src/pkg-chain), against a local relay proxying the public testnet lightwalletd",
+  "listing_label": "jsPayin01 (no sale; detection + withdrawal only)",
+  "request_amount_zats": 155000,
+  "payments_from_external_stand_in": [
+    {
+      "pool": "transparent (P2PKH receiver)",
+      "txid": "d8ff66e2f702390f9cdefd8d624aee1b8adb7c5dcb6a83b743bd8b3839c65380",
+      "height": 4530059,
+      "value": 155000
+    },
+    {
+      "pool": "Orchard-protocol receiver, paid as an Ironwood note",
+      "txid": "41159c474fdee93b238d08ca5349be500e84fd34035f73eb986ca065f43b90e3",
+      "height": 4530065,
+      "value": 100000
+    }
+  ],
+  "app_scan": {
+    "found_coin": true,
+    "found_note_by_compact_trial_decryption": true,
+    "balance_zats": 255000,
+    "paid": true
+  },
+  "withdraw": {
+    "txid": "27fb27295b437a87c00297d1146581894ceb1c1f08343817589a723ae5ede9e4",
+    "height": 4530080,
+    "inputs": "1 Ironwood note (100,000) + 1 P2PKH coin (155,000), built, signed (RedPallas + secp256k1), proved and verified in the wasm32 engine",
+    "value": 240000,
+    "fee": 15000
+  },
+  "app_scan_after": {
+    "balance_zats": 0,
+    "note_marked_spent_by_nullifier": true,
+    "coins": 0
+  }
+}

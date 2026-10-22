@@ -42,6 +42,8 @@ pub mod rpc {
     pub struct CompactOrchardAction {
         #[prost(bytes = "vec", tag = "1")] pub nullifier: Vec<u8>,
         #[prost(bytes = "vec", tag = "2")] pub cmx: Vec<u8>,
+        #[prost(bytes = "vec", tag = "3")] pub ephemeral_key: Vec<u8>,
+        #[prost(bytes = "vec", tag = "4")] pub ciphertext: Vec<u8>,
     }
     #[derive(Clone, PartialEq, prost::Message)]
     pub struct CompactTx {
@@ -49,6 +51,23 @@ pub mod rpc {
         #[prost(bytes = "vec", tag = "2")] pub txid: Vec<u8>,
         #[prost(message, repeated, tag = "9")] pub ironwood_actions: Vec<CompactOrchardAction>,
     }
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct GetAddressUtxosArg {
+        #[prost(string, repeated, tag = "1")] pub addresses: Vec<String>,
+        #[prost(uint64, tag = "2")] pub start_height: u64,
+        #[prost(uint32, tag = "3")] pub max_entries: u32,
+    }
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct GetAddressUtxosReply {
+        #[prost(bytes = "vec", tag = "1")] pub txid: Vec<u8>,
+        #[prost(int32, tag = "2")] pub index: i32,
+        #[prost(bytes = "vec", tag = "3")] pub script: Vec<u8>,
+        #[prost(int64, tag = "4")] pub value_zat: i64,
+        #[prost(uint64, tag = "5")] pub height: u64,
+        #[prost(string, tag = "6")] pub address: String,
+    }
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct GetAddressUtxosReplyList { #[prost(message, repeated, tag = "1")] pub address_utxos: Vec<GetAddressUtxosReply> }
     #[derive(Clone, PartialEq, prost::Message)]
     pub struct CompactBlock {
         #[prost(uint64, tag = "2")] pub height: u64,
@@ -104,6 +123,35 @@ impl Lwd {
         }
         Ok(out)
     }
+    /// Mined transparent coins of `taddr` as lightwalletd reports them:
+    /// `(txid display hex, vout, value, height)`. Callers must re-check each
+    /// one against the raw transaction (`payin::utxo_from_tx`).
+    pub async fn address_utxos(&self, taddr: &str) -> Result<Vec<(String, u32, u64, u32)>> {
+        let r: rpc::GetAddressUtxosReplyList = self.unary("GetAddressUtxos", rpc::GetAddressUtxosArg { addresses: vec![taddr.into()], start_height: 0, max_entries: 0 }).await?;
+        Ok(r.address_utxos.into_iter().map(|u| { let mut t = u.txid; t.reverse(); (hex::encode(t), u.index as u32, u.value_zat as u64, u.height as u32) }).collect())
+    }
+
+    /// Ironwood compact actions of blocks `from..=to`: `(height, txid display hex, actions)`.
+    pub async fn compact_range(&self, from: u32, to: u32) -> Result<Vec<(u32, String, Vec<crate::payin::CompactAct>)>> {
+        let mut g = tonic::client::Grpc::new(self.ch.clone());
+        g.ready().await?;
+        let path = http::uri::PathAndQuery::from_static("/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetBlockRange");
+        let q = rpc::BlockRange { start: Some(rpc::BlockId { height: from as u64, hash: vec![] }), end: Some(rpc::BlockId { height: to as u64, hash: vec![] }), pool_types: vec![POOL_IRONWOOD] };
+        let mut s = g.server_streaming(tonic::Request::new(q), path, tonic_prost::ProstCodec::<rpc::BlockRange, rpc::CompactBlock>::default())
+            .await.map_err(|s| anyhow!("GetBlockRange: {}", s.message()))?.into_inner();
+        let mut out = Vec::new();
+        while let Some(b) = s.message().await.map_err(|s| anyhow!("GetBlockRange: {}", s.message()))? {
+            for t in b.vtx {
+                if t.ironwood_actions.is_empty() { continue; }
+                let mut id = t.txid.clone(); id.reverse();
+                let acts = t.ironwood_actions.into_iter().map(|a| crate::payin::CompactAct {
+                    nf: hex::encode(a.nullifier), cmx: hex::encode(a.cmx), epk: hex::encode(a.ephemeral_key), ct: hex::encode(a.ciphertext) }).collect();
+                out.push((b.height as u32, hex::encode(id), acts));
+            }
+        }
+        Ok(out)
+    }
+
     pub async fn send(&self, raw: Vec<u8>) -> Result<rpc::SendResponse> {
         self.unary("SendTransaction", rpc::RawTransaction { data: raw, height: 0 }).await
     }

@@ -296,6 +296,17 @@ const routes = [
     const n = HEIGHT(h);
     return n + 10 < await tip().catch(lwdErr) ? cached(`cmxs:${n}`, () => lwd.blockCmxs(n)).catch(lwdErr) : lwd.blockCmxs(n).catch(lwdErr);
   }],
+  // "Pay from another wallet": how the buyer's app sees a payment to its
+  // per-purchase pay-in wallet. Mined coins of a testnet P2PKH address, and
+  // Ironwood compact actions (trial-decrypted in the browser; a hit is then
+  // fetched in full via /chain/tx). The browser re-checks every coin against
+  // the raw transaction, so a lying relay can hide a payment, never fake one.
+  ['GET', /^\/chain\/utxos\/(tm[1-9A-HJ-NP-Za-km-z]{30,40})$/, async ([addr]) => lwd.addressUtxos(addr).catch(lwdErr)],
+  ['GET', /^\/chain\/compact\/(\d+)\/(\d+)$/, async ([a, b]) => {
+    const from = HEIGHT(a), to = HEIGHT(b);
+    need(to >= from && to - from < 100, 'range must be 1..100 blocks');
+    return to + 10 < await tip().catch(lwdErr) ? cached(`compact:${from}:${to}`, () => lwd.compactRange(from, to)).catch(lwdErr) : lwd.compactRange(from, to).catch(lwdErr);
+  }],
   // Broadcasts a fully signed and proven transaction (public bytes). The
   // node, not the relay, decides validity (proofs, signatures, lock time).
   ['POST', /^\/chain\/broadcast$/, async (_, body) => {

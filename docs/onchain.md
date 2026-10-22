@@ -2,7 +2,8 @@
 
 Status: **working end to end on the public testnet**, from the CLI and, for single-copy
 (v1) listings, from the browser app (two browsers + relay, no CLI), and with the seller's browser closed through the seller
-agent (`lintel-agent`, see [Seller agent](#seller-agent-browser-closed)). Multi-copy presale
+agent (`lintel-agent`, see [Seller agent](#seller-agent-browser-closed)). Buyers can pay from
+any testnet wallet, shielded or transparent (see [Pay from another wallet](#pay-from-another-wallet)). Multi-copy presale
 listings still settle off-chain. Limits of the browser flow are listed under
 [Browser flow](#browser-flow-single-copy-listings) and [Remaining gaps](#remaining-gaps).
 
@@ -58,8 +59,10 @@ printed. In the product, each side signs in its own browser through lintel-wasm.
 
 ## Browser flow (single-copy listings)
 
-A seller ticks "Settle on Zcash testnet" when listing. A buyer with a funded device wallet
-(Wallet page: create or import a key, then scan a txid that paid it) clicks "Buy on-chain".
+A seller ticks "Settle on Zcash testnet" when listing. A buyer either uses a funded device wallet
+(Wallet page: create or import a key, then scan a txid that paid it) and clicks "Buy with this
+device's wallet", or clicks "Pay from another wallet" and pays a ZIP 321 request from any testnet
+wallet ([Pay from another wallet](#pay-from-another-wallet)).
 Each browser runs its own half with the on-chain engine (`wasm/` with feature `chain`,
 loaded as `src/pkg-chain` in a worker); they talk only through the relay's write-once
 session fields, and chain data goes through the relay's lightwalletd proxy
@@ -91,6 +94,141 @@ JSON-quoted on success and the relay did not accept that form. Fixed in the rela
 accepted) and in the app (on a rejection, a txid the node already knows counts as broadcast).
 That sale never settled; its escrow is recovered with the pre-signed time-locked refund via
 `web/app/scripts/refund-from-state.mjs` after its lock: refund `992163c4a20b3cc2e363b3720aeac8f25162c81bc795736d285b0b1bd3e43392` mined at height 4,522,635 (nLockTime 4,522,631). Record: [`testnet/evidence-browser-refund.json`](testnet/evidence-browser-refund.json).
+
+## Pay from another wallet
+
+A buyer no longer needs a funded device wallet. "Pay from another wallet" shows a ZIP 321
+payment request (QR code + URI) that **any Zcash testnet wallet** can pay; once the payment is
+mined the app funds the escrow from it and the sale continues exactly as before.
+
+**Why not pay the escrow directly?** The time-locked refund is pre-signed over the exact escrow
+note (its `rho`/`rseed`, known only to whoever builds the funding transaction), and the funding
+must also create the buyer's 20,000-zat lock coin at `vout 0`. A plain wallet payment can do
+neither. So each purchase gets its own **pay-in wallet**: one Ironwood spending key and one
+transparent key, generated and stored on the device (like the device wallet) *before* its
+address is shown. The external wallet pays the pay-in wallet; the app builds the funding and the
+refund itself, so every existing safety property is unchanged: the refund is co-signed before the
+funding is broadcast, and the funding is built and proven on the device.
+
+**Which pools can external wallets pay on today's testnet?** (decision record)
+
+- *Orchard pool:* closed to new value since NU6.3 ([ZIP 258](https://zips.z.cash/zip-0258)).
+  Pre-NU6.3 wallets cannot send there; their shielded sends fail.
+- *Ironwood pool:* receivers are scoped to the Orchard **protocol**, not to a pool
+  ([ZIP 326](https://zips.z.cash/zip-0326)), so an NU6.3-aware wallet (for example Zallet
+  v0.1.0-beta.1, which ships Ironwood support; Zodl 3.8.0+ on mainnet) pays an ordinary Orchard
+  receiver with an **Ironwood note**. There is no separate "Ironwood address" to support. Which
+  third-party wallets do this *on testnet* today was not tested here.
+- *Transparent (P2PKH):* every wallet, node and exchange can pay it, including wallets whose
+  shielded support has not caught up with NU6.3 (e.g. the Zcash fork node of
+  [ShieldedLabs/zero#3](https://github.com/ShieldedLabs/zero/pull/3), which sends transparent and
+  Sapling only).
+- *Sapling:* not offered. The engine has no Sapling code; a wallet that only does Sapling falls
+  back to the transparent receiver.
+
+The request is therefore a Unified Address with **two receivers**, Orchard-protocol and P2PKH
+(`payin::payment_ua`). Wallets pick the most preferred receiver they support (ZIP 316), so
+NU6.3 wallets pay privately and everything else pays transparent. A second URI with the bare
+`tm…` address is shown for wallets that cannot read UAs.
+
+**No sweep transaction.** The funding transaction spends the payment directly: an Ironwood note
+as a shielded spend, or P2PKH coins as transparent inputs (`payin::build`, standard
+`zcash_primitives` `Builder`; the `DeferredPcztBuilder` used for escrow spends takes no
+transparent inputs). v6 txids exclude transparent signatures and shielded proofs (ZIP 244), so the
+funding txid, the escrow note and the lock outpoint are fixed before anything is signed, which is
+all the refund needs. Both shapes cost the same 15,000-zat fee (2 Ironwood actions + 1 transparent
+logical action), so one request amount works for either receiver:
+**price + 20,000 (settlement fees) + 20,000 (lock coin, returned) + 15,000 (funding fee)**.
+A single sweep-then-fund design was considered and rejected: one more transaction, one more
+confirmation, one more fee, and an extra window in which funds sit in a state the refund does not
+cover, for no safety gain.
+
+**Detection** (all public data through the relay, nothing trusted):
+
+- Transparent: `GET /chain/utxos/:taddr` (lightwalletd `GetAddressUtxos`). Each claimed coin is
+  re-read from the raw mined transaction and checked in WASM (`payin::utxo_from_tx`: the bytes
+  match the txid, the output exists and pays the pay-in t-address with that value).
+- Ironwood: `GET /chain/compact/:from/:to` (Ironwood compact actions, ≤100 blocks per call) is
+  trial-decrypted in the browser (`payin::scan_compact`); a hit is fetched in full and decrypted
+  with `chain::find_notes`. Nullifiers seen in later blocks mark notes spent.
+- A lying relay can hide a payment (the buyer sees "waiting") but cannot invent one or change
+  its value. Only mined payments count (one confirmation).
+
+The app watches every 15 s and, once the pay-in wallet covers the escrow + lock coin + fee
+(`payin::select`: all coins, plus at most one Ironwood note so the funding has one anchor), opens
+the session and continues automatically. The session is opened only **after** the payment is
+mined, so a slow wallet never holds the seller's app or agent up.
+
+**Recovery.** Refund, settlement change and the returned lock coin are paid to the pay-in wallet.
+The Wallet page lists every pay-in wallet with its balance, a Scan button, **Withdraw**
+(sweeps everything to any `utest1…`/`tm…` address; one Ironwood note per transaction plus all
+coins) and **Download backup** (the two keys + request, importable on another device). If the
+listing sells to someone else while the buyer is paying, or the buyer changes their mind, the
+payment is withdrawn the same way. If the browser's storage is cleared without a backup, a
+pay-in wallet's funds are lost, exactly as with the device wallet and its signed refund.
+
+**Privacy.** A shielded payment keeps the payer private. A transparent payment links the paying
+address to the funding transaction (and the lock coin already links funding and refund on chain).
+A fresh pay-in wallet per purchase keeps purchases unlinkable to each other.
+
+**Later (not built):** an unsigned funding PCZT handed to a PCZT-capable external wallet (e.g. a
+hardware wallet) to sign directly, without the pay-in hop.
+
+**Live runs (2026-10-22, Zcash testnet, local relay, public testnet lightwalletd, seller =
+`lintel-agent` with the seller's app closed).** The "external wallet" is a stand-in
+(`live_agent_sale external-pay`): a separate throwaway key that reads only the ZIP 321 URI,
+takes the receiver from the address and pays from its own Ironwood note. No third-party wallet
+app was driven.
+
+| Run | What | Height | Txid |
+| --- | --- | --- | --- |
+| A: transparent receiver | External wallet → pay-in t-address, 2,055,000 zats | 4,529,992 | `d38a395f17644f8c27598ac5a0c5ae6c6d287dbb872ff52b793bce7b2c25e3ed` |
+| A | Funding from that coin (escrow 2,020,000 + lock coin at vout 0; no sweep tx) | 4,529,996 | `b5341a69d0db7c469c24d7a3b2eb44caba69aaa633e121bee4a3c50ed96de328` |
+| A | Settlement by `lintel-agent` (seller +2,000,000; change 10,000 to the pay-in wallet) | 4,530,002 | `f765cb4e12f3a2fa22d7afb0c6d1973a4372351460990222f72fae26405ec628` |
+| A | Withdraw: change note + lock coin → the external wallet's UA (15,000 after fee) | 4,530,006 | `812fb2324cd7e224a8851c60cf842091cf61c9e06c150ed9140283e86eb38556` |
+| B: Orchard-protocol receiver | External wallet → pay-in UA, paid as an **Ironwood note**, 2,055,000 zats | 4,530,006 | `7375623f73840a1e0c5c9becc4c818fb1f7233e72899839f377fdfbc33b91bd2` |
+| B | Funding from that note (found by compact-block trial decryption) | 4,530,012 | `26c604cfe5dd5d9fd515668c1ddb6f05254e2cfa017cbe7ff28a3ce000536b8c` |
+| B | Settlement by `lintel-agent` | 4,530,013 | `a7575c5e61915887f8ccdd14a9cd68a7c05c155387aa8fce858ead3f5aadcf9a` |
+| B | Withdraw: change note + lock coin → a `tm…` address | 4,530,021 | `bc7062bb80c9c806803be2b66dc0dfc970e14c929bcf4b187e6b138ae3f7d585` |
+
+In both runs the refund (locks 4,530,053 and 4,530,068) was co-signed by the agent and stored
+before the funding was broadcast, the buyer recovered `t` from the mined settlement, and the
+decrypted content matched the listing's content hash. Records:
+[`testnet/evidence-payin-transparent-sale.json`](testnet/evidence-payin-transparent-sale.json),
+[`testnet/evidence-payin-shielded-sale.json`](testnet/evidence-payin-shielded-sale.json).
+
+**The app's own code, live.** `web/app/scripts/payin-live.mjs` bundles `src/onchain.js` unchanged
+and runs it in Node on the same wasm32 engine the browser loads (`npm run wasm:chain`), against the
+local relay. A request was paid twice by the stand-in wallet (155,000 zats to the P2PKH receiver,
+`d8ff66e2…c65380` at 4,530,059; 100,000 zats to the Orchard receiver as an Ironwood note,
+`41159c47…b90e3` at 4,530,065); `payin.scan` found both (the note by compact trial decryption);
+`payin.withdraw` built one transaction spending the note and the coin in WASM (RedPallas +
+secp256k1 signatures, Halo 2 proof), the node accepted it and it was mined
+(`27fb27295b437a87c00297d1146581894ceb1c1f08343817589a723ae5ede9e4` at 4,530,080); a rescan then
+showed the note spent (by nullifier) and no coins. Record:
+[`testnet/evidence-payin-wasm-app-code.json`](testnet/evidence-payin-wasm-app-code.json). The
+pay-in panel and Wallet page were also rendered in headless Chromium from the production build;
+the QR codes decode to the exact ZIP 321 URIs. A full browser purchase through the pay-in panel
+(both browsers driven by UI) was not run.
+
+An earlier attempt the same day (listing `V9sgRpyJ7aVx`) also completed on chain (payment
+`4e0d2f44ee5f8c343cc6d88fbd28df9f8b7a634e2e76d425bd38ee674803ffa2` at 4,529,968, funding
+`81c48b508af5b95d578fb949930c21f2f6caeda8e3b62a28c88bb51ff705a43e` at 4,529,969, settlement
+`934fe4c23b327335434c9bcaf9225783eb952958b7c1c6fb0ddae36dd03338ec` at 4,529,971; the payout
+wallet received 2,000,000), but the build machine was rolled back mid-run and the buyer's local
+records (including its decryption check) were lost, so it is not counted as evidence.
+
+Reproduce (after the [Seller agent](#seller-agent-browser-closed) setup; `demo/` holds the
+external wallet's `payer-wallet.json` + `payer-change-note.json`):
+
+```bash
+$B/examples/live_agent_sale demo seller http://127.0.0.1:8787
+$B/lintel-agent import demo/handoff.SECRET.json --dir demo/agent && $B/lintel-agent run --dir demo/agent &
+$B/examples/live_agent_sale demo payin-request http://127.0.0.1:8787   # writes demo/payin-request.json (URI)
+$B/examples/live_agent_sale demo external-pay transparent              # or: orchard
+$B/examples/live_agent_sale demo buyer http://127.0.0.1:8787 payin      # waits for the payment, then buys
+$B/examples/live_agent_sale demo payin-withdraw <utest1…|tm…>           # sweep what is left
+```
 
 ## Seller agent (browser closed)
 
@@ -151,7 +289,8 @@ Browser-flow limits (as of this branch):
   spent only when this device funds an escrow with it. It does not scan the chain for spends
   made elsewhere (e.g. the same key imported on two devices), and it does not add change,
   refund or payout notes automatically — scan their txids. Funding needs one note that covers
-  escrow + lock coin + fee.
+  escrow + lock coin + fee. (Pay-in wallets, used by "Pay from another wallet", do scan the chain
+  for their own payments, change, refunds and spends.)
 - **Recovery is local.** The signed refund and the wallet key live only in that browser's
   localStorage. Clearing it before broadcasting the refund loses the escrow (testnet funds).
 - **Production build unverified.** `web/app/build.sh` builds the on-chain engine with
@@ -379,6 +518,10 @@ Other refund caveats:
 | Live, browser | 1 sale settled on testnet (table above) | `node scripts/onchain-live.mjs` in `web/app` |
 | Engine, feature `agent` (2026-10-22, branch `seller-agent`) | lib 31 passed; `tests/agent.rs` 5 passed (offline sale with the seller absent, rogue buyer key, early-unlock refund, near-expiry refusal, handoff checks); settlement 1 passed | `cargo test --release --features agent` in `engine/` |
 | Live, seller agent | 1 sale settled on testnet with the seller's browser closed (table above) | `examples/live_agent_sale` + `lintel-agent` |
+| Engine, feature `agent` (2026-10-22, branch `real-wallet-funding`) | lib 33 passed (adds ZIP 321 and two-receiver UA unit tests); `tests/agent.rs` 5 passed; `tests/payin.rs` 3 passed (transparent payment → funding → refund pre-signed → settlement → sweep; Ironwood payment found by compact scan → funding; split/short/overpaid payments); settlement 1 passed | `cargo test --release --features agent` in `engine/` |
+| wasm, feature `chain` (same branch) | 6 passed (adds `payin_bindings_detect_and_fund_offline`) | `cargo test --release --features chain` in `wasm/` |
+| Relay (same branch) | 14 passed (adds `/chain/utxos` and `/chain/compact`) | `node --test` in `web/relay` |
+| Live, pay from another wallet | 2 sales settled on testnet, one paid to the transparent receiver, one to the Orchard-protocol receiver (Ironwood note), plus 2 withdrawals | `examples/live_agent_sale` (`payin-request`, `external-pay`, `buyer … payin`, `payin-withdraw`) |
 
 The integration test covers the whole flow offline:
 

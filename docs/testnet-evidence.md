@@ -2,6 +2,21 @@
 
 Every flow below ran on Zcash testnet (NU7, Ironwood pool, v6 transactions) and was mined. Raw records are in [`docs/testnet/`](testnet/). Amounts are in zatoshis (1 TAZ = 100,000,000 zats).
 
+## Pay from another wallet (buyer without a device wallet)
+
+Price 0.02 TAZ, seller side run only by `lintel-agent`. The buyer's app opened a per-purchase pay-in wallet and showed a ZIP 321 request for 2,055,000 zats (escrow 2,020,000 + lock coin 20,000 + funding fee 15,000). A separate wallet paid it; the buyer detected the mined payment, funded the escrow straight from it (no sweep transaction), had the time-locked refund co-signed before broadcasting the funding, and decrypted the content from the mined settlement. What was left in the pay-in wallet was then withdrawn. The paying wallet was a stand-in (a separate key driven by `live_agent_sale external-pay` that reads only the URI), not a third-party wallet app. Records: [`testnet/evidence-payin-transparent-sale.json`](testnet/evidence-payin-transparent-sale.json), [`testnet/evidence-payin-shielded-sale.json`](testnet/evidence-payin-shielded-sale.json).
+
+| Run | Step | Height | Txid |
+| --- | --- | --- | --- |
+| Transparent receiver | Payment (external → pay-in t-address) | 4,529,992 | `d38a395f17644f8c27598ac5a0c5ae6c6d287dbb872ff52b793bce7b2c25e3ed` |
+| Transparent receiver | Funding (from the coin) | 4,529,996 | `b5341a69d0db7c469c24d7a3b2eb44caba69aaa633e121bee4a3c50ed96de328` |
+| Transparent receiver | Settlement | 4,530,002 | `f765cb4e12f3a2fa22d7afb0c6d1973a4372351460990222f72fae26405ec628` |
+| Transparent receiver | Withdraw (change + lock coin) | 4,530,006 | `812fb2324cd7e224a8851c60cf842091cf61c9e06c150ed9140283e86eb38556` |
+| Orchard receiver (Ironwood note) | Payment (external → pay-in UA) | 4,530,006 | `7375623f73840a1e0c5c9becc4c818fb1f7233e72899839f377fdfbc33b91bd2` |
+| Orchard receiver (Ironwood note) | Funding (from the note) | 4,530,012 | `26c604cfe5dd5d9fd515668c1ddb6f05254e2cfa017cbe7ff28a3ce000536b8c` |
+| Orchard receiver (Ironwood note) | Settlement | 4,530,013 | `a7575c5e61915887f8ccdd14a9cd68a7c05c155387aa8fce858ead3f5aadcf9a` |
+| Orchard receiver (Ironwood note) | Withdraw (change + lock coin) | 4,530,021 | `bc7062bb80c9c806803be2b66dc0dfc970e14c929bcf4b187e6b138ae3f7d585` |
+
 ## Seller agent sale (seller's browser closed)
 
 Price 0.02 TAZ. The seller's side was run only by `lintel-agent` (a separate process, started from the app's handoff file); the buyer used the relay's HTTP API and lightwalletd. The agent co-signed the time-locked refund (lock 4,529,955) before funding, then built, signed, proved and broadcast the settlement. The payout address received 2,000,000 zats. The buyer recovered `t` from the mined settlement and the decrypted content matched the listing's content hash. Record: [`testnet/evidence-agent-sale.json`](testnet/evidence-agent-sale.json).

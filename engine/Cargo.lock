@@ -2889,6 +2889,7 @@ dependencies = [
  "rand_core 0.10.1",
  "redjubjub",
  "sapling-crypto",
+ "secp256k1",
  "sha2 0.10.9",
  "zcash_encoding",
  "zcash_note_encryption",
