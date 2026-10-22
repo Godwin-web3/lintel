@@ -14,7 +14,7 @@ export function Qr({ text, size = 220 }) {
   for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) cells.push(`M${c + m},${r + m}h1v1h-1z`);
   return (
     <svg className="qr" role="img" aria-label="Payment request QR code" width={size} height={size} viewBox={`0 0 ${n + 2 * m} ${n + 2 * m}`} shapeRendering="crispEdges">
-      <rect width="100%" height="100%" fill="#fff" /><path d={cells.join('')} fill="#000" />
+      <rect className="qr-bg" width="100%" height="100%" /><path className="qr-fg" d={cells.join('')} />
     </svg>
   );
 }
@@ -38,7 +38,7 @@ export function PayinFunds({ lid, compact }) {
   return (
     <div className="payin-funds small">
       {!compact && <div className="row title-row"><b>{p.title || p.listing}</b></div>}
-      <p>Pay-in wallet: <span className="amt">{fmtZec(bal)}<span className="unit">TAZ</span></span> <span className="muted">spendable (checked to block {Number(p.scanned).toLocaleString('en-US')})</span></p>
+      <p>Pay-in wallet: <span className="amt">{fmtZec(bal)}<span className="unit">TAZ</span></span> <span className="muted">spendable (checked to block <span className="mono">{Number(p.scanned).toLocaleString('en-US')}</span>)</span></p>
       <div className="form">
         <button className="btn ghost sm" disabled={busy} onClick={() => run(async () => { const st = await payin.scan(lid); return `Checked to block ${st.scanned.toLocaleString('en-US')}: ${fmtZec(st.have)} TAZ spendable`; })}>Scan</button>
         <label><span className="label">Withdraw everything to</span>
@@ -47,7 +47,7 @@ export function PayinFunds({ lid, compact }) {
         <button className="btn ghost sm" disabled={busy || !dest || bal === 0} onClick={() => run(async () => { const r = await payin.withdraw(lid, dest); return `Sent ${fmtZec(r.value)} TAZ (fee ${fmtZec(r.fee)}): ${r.txid}${r.more ? '. More notes remain: scan after it is mined and withdraw again.' : ''}`; })}>Withdraw</button>
         <button className="link" onClick={() => download(`lintel-payin-${lid}.SECRET.json`, payin.backup(lid))}>Download backup (secret keys)</button>
       </div>
-      {msg && <p className="msg" role="status" style={{ overflowWrap: 'anywhere' }}>{msg}</p>}
+      {msg && <p className="msg" role="status">{msg}</p>}
     </div>
   );
 }
@@ -79,20 +79,20 @@ function PayinRequest({ listing, onPaid }) {
     <div className="payin">
       <p className="small">
         Pay <span className="amt">{fmtZec(p.amount)}<span className="unit">TAZ</span></span> from any Zcash testnet wallet:
-        the escrow ({fmtZec(p.escrowValue)}) + the lock coin ({fmtZec(LOCK_VALUE)}, returned to you) + the funding fee ({fmtZec(p.amount - p.escrowValue - LOCK_VALUE)}).
+        the escrow (<span className="mono">{fmtZec(p.escrowValue)}</span>) + the lock coin (<span className="mono">{fmtZec(LOCK_VALUE)}</span>, returned to you) + the funding fee (<span className="mono">{fmtZec(p.amount - p.escrowValue - LOCK_VALUE)}</span>).
         Shielded (NU6.3, Ironwood) wallets pay privately; transparent-only wallets work too.
       </p>
       <div className="payin-qr"><Qr text={uri} /></div>
       <dl className="facts">
         <dt>Amount</dt><dd className="mono">{fmtZec(p.amount)} TAZ <button className="link" onClick={() => copy(fmtZec(p.amount))}>copy</button></dd>
-        <dt>{alt ? 't-address' : 'Address'}</dt><dd className="mono small" style={{ overflowWrap: 'anywhere' }}>{addr} <button className="link" onClick={() => copy(addr)}>copy</button></dd>
-        <dt>Request</dt><dd className="mono small" style={{ overflowWrap: 'anywhere' }}><a href={uri}>{uri.slice(0, 48)}…</a> <button className="link" onClick={() => copy(uri)}>copy</button></dd>
+        <dt>{alt ? 't-address' : 'Address'}</dt><dd className="mono small">{addr} <button className="link" onClick={() => copy(addr)}>copy</button></dd>
+        <dt>Request</dt><dd className="mono small"><a href={uri}>{uri.slice(0, 48)}…</a> <button className="link" onClick={() => copy(uri)}>copy</button></dd>
       </dl>
       <p className="small"><button className="link" onClick={() => setAlt(!alt)}>{alt ? 'Show the unified address (recommended)' : 'Wallet cannot read unified addresses? Use the t-address'}</button></p>
       <p className="small muted" aria-live="polite">
         {!st ? 'Watching the chain for your payment…'
           : st.paid ? 'Payment confirmed. Starting the purchase…'
-          : `Received ${fmtZec(st.have)} of ${fmtZec(st.need)} TAZ (mined payments only; checked to block ${st.scanned.toLocaleString('en-US')}). Checking every 15 s.`}
+          : <>Received <span className="mono">{fmtZec(st.have)}</span> of <span className="mono">{fmtZec(st.need)} TAZ</span> (mined payments only; checked to block <span className="mono">{st.scanned.toLocaleString('en-US')}</span>). Checking every 15 s.</>}
       </p>
       <p className="small muted">
         The pay-in wallet's keys are stored in this browser only. If the sale does not go ahead nothing is lost: withdraw the
@@ -171,7 +171,7 @@ export function WalletPanel({ boot }) {
               </table>
             </div>
           )}
-          <p className="small" style={{ marginTop: 24 }}><button className="link danger" onClick={() => setShow(!show)}>{show ? 'Hide' : 'Show'} spending key (secret)</button></p>
+          <p className="small spaced"><button className="link danger" onClick={() => setShow(!show)}>{show ? 'Hide' : 'Show'} spending key (secret)</button></p>
           {show && <pre className="secret">{JSON.stringify({ sk: w.sk })}</pre>}
         </>
       )}
@@ -264,7 +264,7 @@ export function OnchainBuy({ listing, verifiedT, boot, onDone }) {
           {refund.ready && <button className="btn danger sm" onClick={doRefund}>Broadcast refund</button>}
         </div>
       )}
-      {refund?.broadcast && <p className="small">Refund broadcast: <code style={{ overflowWrap: 'anywhere' }}>{refund.broadcast}</code></p>}
+      {refund?.broadcast && <p className="small">Refund broadcast: <code className="anywhere">{refund.broadcast}</code></p>}
       {active && entry?.chain?.source === 'payin' && (phase === 'done' || refund?.broadcast) && <PayinFunds lid={listing.id} compact />}
       {err && <p className="error" role="alert">{err}</p>}
     </div>

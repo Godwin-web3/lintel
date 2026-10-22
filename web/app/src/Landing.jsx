@@ -34,19 +34,20 @@ function Receipt() {
 }
 
 function Trilithon() {
-  // Brand mark on its 96-unit grid, scaled 4x, with quiet annotations.
+  // Brand mark geometry on its 96-unit grid, scaled 4x (beam 80x17, posts 21x49,
+  // 6-unit reveal), with quiet annotations. Fills come from the brand tokens.
   return (
     <figure className="tri-figure" aria-label="Diagram: two posts carry one beam. The posts are the buyer's and seller's key shares; the beam is the settlement signature that reveals the key.">
-      <svg viewBox="0 0 400 340" role="img" aria-hidden="true">
+      <svg viewBox="0 0 400 372" role="img" aria-hidden="true">
         <text x="40" y="38">Beam · the settlement</text>
-        <rect x="40" y="56" width="320" height="68" fill="#F4B728" />
-        <text x="200" y="97" textAnchor="middle" className="v" style={{ fill: '#0E0F11' }}>s = s_a + s_b + t</text>
-        <rect x="76" y="148" width="84" height="164" fill="#ECE6DA" />
-        <rect x="240" y="148" width="84" height="164" fill="#ECE6DA" />
-        <text x="200" y="238" textAnchor="middle" className="v">t</text>
-        <line x1="166" y1="312" x2="234" y2="312" stroke="#8C929C" strokeDasharray="2 4" />
-        <text x="118" y="336" textAnchor="middle">Buyer</text>
-        <text x="282" y="336" textAnchor="middle">Seller</text>
+        <rect className="beam" x="40" y="56" width="320" height="68" />
+        <text x="200" y="97" textAnchor="middle" className="v on-beam">s = s_a + s_b + t</text>
+        <rect className="post" x="76" y="148" width="84" height="196" />
+        <rect className="post" x="240" y="148" width="84" height="196" />
+        <text x="200" y="254" textAnchor="middle" className="v">t</text>
+        <line className="gap" x1="166" y1="344" x2="234" y2="344" strokeDasharray="2 4" />
+        <text x="118" y="368" textAnchor="middle">Buyer</text>
+        <text x="282" y="368" textAnchor="middle">Seller</text>
       </svg>
     </figure>
   );
@@ -65,7 +66,7 @@ export default function Landing() {
   return (
     <div className="site">
       <SiteHeader />
-      <main id="content" style={{ padding: 0 }}>
+      <main id="content">
         <section className="hero">
           <div className="wrap">
             <div>
@@ -77,7 +78,7 @@ export default function Landing() {
                 carries the key, so getting paid and unlocking the file are the same transaction.
               </p>
               <div className="ctas">
-                <a className="btn" href="/app">Launch app</a>
+                <a className="btn solid" href="/app">Launch app</a>
                 <Link className="btn ghost" to="/docs">Read the docs</Link>
               </div>
             </div>
@@ -161,7 +162,7 @@ export default function Landing() {
                 </ul>
               </div>
               <div className="panel">
-                <h3><span className="chip error">Limits</span></h3>
+                <h3><span className="chip">Limits</span></h3>
                 <ul className="ticks limit">
                   <li><b>Testnet only, unaudited.</b> It runs on Zcash testnet with TAZ, which has no value.</li>
                   <li><b>The seller must be online to settle.</b> Their open app co-signs the refund before the buyer funds, and must broadcast the settlement before it expires.</li>
@@ -242,7 +243,7 @@ export default function Landing() {
             <div className="label">Try it on testnet</div>
             <h2 className="display">Sealed until <em>settled</em>.</h2>
             <div className="ctas">
-              <a className="btn" href="/app">Launch app</a>
+              <a className="btn solid" href="/app">Launch app</a>
               <Link className="btn ghost" to="/docs/quickstart">Quickstart</Link>
             </div>
           </div>

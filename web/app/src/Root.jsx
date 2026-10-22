@@ -13,7 +13,7 @@ export default function Root() {
   if (path === '/') return <Landing />;
   if (path === '/app') {
     return (
-      <Suspense fallback={<div className="shell"><p className="muted" style={{ padding: '96px 0' }}>Loading the marketplace…</p></div>}>
+      <Suspense fallback={<div className="shell"><p className="muted bootwait">Loading the marketplace…</p></div>}>
         <App />
       </Suspense>
     );
