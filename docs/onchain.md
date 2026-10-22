@@ -1,7 +1,8 @@
 # On-chain settlement on Zcash testnet
 
 Status: **working end to end on the public testnet**, from the CLI and, for single-copy
-(v1) listings, from the browser app (two browsers + relay, no CLI). Multi-copy presale
+(v1) listings, from the browser app (two browsers + relay, no CLI), and with the seller's browser closed through the seller
+agent (`lintel-agent`, see [Seller agent](#seller-agent-browser-closed)). Multi-copy presale
 listings still settle off-chain. Limits of the browser flow are listed under
 [Browser flow](#browser-flow-single-copy-listings) and [Remaining gaps](#remaining-gaps).
 
@@ -91,12 +92,60 @@ accepted) and in the app (on a rejection, a txid the node already knows counts a
 That sale never settled; its escrow is recovered with the pre-signed time-locked refund via
 `web/app/scripts/refund-from-state.mjs` after its lock: refund `992163c4a20b3cc2e363b3720aeac8f25162c81bc795736d285b0b1bd3e43392` mined at height 4,522,635 (nLockTime 4,522,631). Record: [`testnet/evidence-browser-refund.json`](testnet/evidence-browser-refund.json).
 
+## Seller agent (browser closed)
+
+"Hand off to agent" on a single-copy on-chain listing (My sales) downloads a handoff file
+with that listing's signing share, adaptor secret and relay token. `lintel-agent import <file>`
+checks it against the relay (T and merchant key must match the listing), and `lintel-agent run`
+then does the seller's steps S1 to S5 with no browser: checks the buyer's key proof, binds the
+escrow key, co-signs the time-locked refund, builds the settlement once the funding is mined,
+signs, proves and broadcasts it. It re-runs every check the seller's app makes
+(`engine/src/agent.rs`) and talks to lightwalletd directly (`LINTEL_LWD`). Payouts go to the
+address in the handoff file; the agent holds no wallet spending key. Whoever holds the handoff
+file or the agent directory can complete the sale, so keep them on a machine you control.
+
+**Live run (2026-10-22, Zcash testnet, local relay, public testnet lightwalletd).** The
+seller command published the listing, wrote the handoff file in the app's format and exited.
+From then on the only seller-side process was `lintel-agent run`. The buyer
+(`engine/examples/live_agent_sale.rs`, the same steps as the app's `advanceBuyer`) talked only
+to the relay's HTTP API and lightwalletd.
+
+| What | txid | Height |
+| --- | --- | --- |
+| Faucet → buyer wallet (12,500,000 zats) | `cda8d138eaf0f66f57495c8c6b4cfa0cc864b8916a46506e777f55cd693ed800` | 4,529,887 |
+| Funding (buyer → joint escrow 2,020,000 zats, + 20,000-zat lock coin) | `5ce0e78dd3bd61bfdeb9f09ec4c0fa08f59d97bb4c5fa06d050c40b1ef2f2b8d` | 4,529,902 |
+| Settlement (built, signed, proved and broadcast by `lintel-agent`; expiry 4,529,955) | `5104f5af5766142cdeeba4d742b24c37149cbfdeaadbe51dd501d99e7c9aacc2` | 4,529,908 |
+
+The agent co-signed the buyer's refund (locked until block 4,529,955) before the funding was
+broadcast. The payout address received 2,000,000 zats. The buyer read the mined settlement,
+recovered `t` from its spend-auth signature, and the decrypted content matched the listing's
+content hash (`decrypted_matches_content_hash: true`). The relay never held a completed
+signature. The buyer's and seller's key shares needed negation in this run (ỹ(ak) = 1), so the
+negation path was exercised live. Record:
+[`testnet/evidence-agent-sale.json`](testnet/evidence-agent-sale.json).
+
+Reproduce (local relay; `NO_PROXY=127.0.0.1` if an HTTP proxy is set in your environment):
+
+```bash
+cd engine
+cargo build --release --features agent --bins --example live_agent_sale
+B=$CARGO_TARGET_DIR/release   # or ../target/release
+# demo/ holds payer-wallet.json + payer-source-note.json (see Reproduce above)
+(cd ../web/relay && node server.js &)                            # port 8787
+$B/examples/live_agent_sale demo seller http://127.0.0.1:8787     # lists, writes demo/handoff.SECRET.json, exits
+$B/lintel-agent import demo/handoff.SECRET.json --dir demo/agent
+$B/lintel-agent run --dir demo/agent &                           # the only seller-side process
+$B/examples/live_agent_sale demo buyer http://127.0.0.1:8787      # writes demo/evidence-agent-sale.json
+```
+
 Browser-flow limits (as of this branch):
 
-- **The seller must be online when a buyer starts.** The refund is co-signed by the seller's
-  open app *before* the buyer funds; with the seller offline the buyer waits and nothing is
-  funded. The seller must also stay online to settle before the settlement expiry, or the buyer
-  takes the refund after it. There is no seller agent for on-chain sales.
+- **Someone must act for the seller during a sale.** The refund is co-signed *before* the
+  buyer funds, and the settlement must be broadcast before its expiry, or the buyer takes the
+  refund after it. That is either the seller's open app or the seller agent (`lintel-agent`,
+  [above](#seller-agent-browser-closed)), which must be running when a buyer starts and until
+  the settlement is mined. The agent is a process the seller runs (laptop, VPS); there is no
+  hosted agent.
 - **Presale (multi-copy, v2) listings are not wired on-chain.** They still settle off-chain.
 - **The device wallet is minimal.** It only knows notes you scan in by txid; it marks a note
   spent only when this device funds an escrow with it. It does not scan the chain for spends
@@ -328,6 +377,8 @@ Other refund caveats:
 | wasm, feature `chain` | 5 passed (adds `chain::tests::browser_settlement_and_time_locked_refund_offline`: funding, v2 time-locked refund co-signed before funding, adaptor-signed settlement, proving + verification, `t` recovered from the raw settlement, all through the browser bindings) | `cargo test --release --features chain` in `wasm/` |
 | Relay | 13 passed (incl. chain proxy: height/tree/cmxs/broadcast, JSON-quoted txid accepted, node error = rejected; chain-mode sessions) | `node --test` in `web/relay` |
 | Live, browser | 1 sale settled on testnet (table above) | `node scripts/onchain-live.mjs` in `web/app` |
+| Engine, feature `agent` (2026-10-22, branch `seller-agent`) | lib 31 passed; `tests/agent.rs` 5 passed (offline sale with the seller absent, rogue buyer key, early-unlock refund, near-expiry refusal, handoff checks); settlement 1 passed | `cargo test --release --features agent` in `engine/` |
+| Live, seller agent | 1 sale settled on testnet with the seller's browser closed (table above) | `examples/live_agent_sale` + `lintel-agent` |
 
 The integration test covers the whole flow offline:
 
@@ -352,8 +403,8 @@ The integration test covers the whole flow offline:
 ## Remaining gaps
 
 - **Browser UI.** Single-copy listings run on-chain in the browser (see
-  [Browser flow](#browser-flow-single-copy-listings)), with its limits: seller must be online
-  to co-sign the refund before funding, presale listings not wired, minimal wallet that does
+  [Browser flow](#browser-flow-single-copy-listings)), with its limits: the seller's app or a
+  running `lintel-agent` must co-sign the refund before funding, presale listings not wired, minimal wallet that does
   not track spends made elsewhere, refund kept only in localStorage, and the production
   (Vercel) build of the on-chain engine unverified (needs clang; stub fallback).
 - **Refund timelock:** implemented (item 5, v2). The `lintel-chain` CLI subcommands accept

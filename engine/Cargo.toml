@@ -82,3 +82,7 @@ required-features = ["net"]
 [[example]]
 name = "testnet_sale"
 required-features = ["net"]
+
+[[example]]
+name = "live_agent_sale"
+required-features = ["agent"]

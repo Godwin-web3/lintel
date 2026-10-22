@@ -2,6 +2,15 @@
 
 Every flow below ran on Zcash testnet (NU7, Ironwood pool, v6 transactions) and was mined. Raw records are in [`docs/testnet/`](testnet/). Amounts are in zatoshis (1 TAZ = 100,000,000 zats).
 
+## Seller agent sale (seller's browser closed)
+
+Price 0.02 TAZ. The seller's side was run only by `lintel-agent` (a separate process, started from the app's handoff file); the buyer used the relay's HTTP API and lightwalletd. The agent co-signed the time-locked refund (lock 4,529,955) before funding, then built, signed, proved and broadcast the settlement. The payout address received 2,000,000 zats. The buyer recovered `t` from the mined settlement and the decrypted content matched the listing's content hash. Record: [`testnet/evidence-agent-sale.json`](testnet/evidence-agent-sale.json).
+
+| Step | Height | Txid |
+| --- | --- | --- |
+| Funding | 4,529,902 | `5ce0e78dd3bd61bfdeb9f09ec4c0fa08f59d97bb4c5fa06d050c40b1ef2f2b8d` |
+| Settlement | 4,529,908 | `5104f5af5766142cdeeba4d742b24c37149cbfdeaadbe51dd501d99e7c9aacc2` |
+
 ## Browser sale (app UI, two browser contexts)
 
 Price 0.02 TAZ. The buyer decrypted the content and it matched.

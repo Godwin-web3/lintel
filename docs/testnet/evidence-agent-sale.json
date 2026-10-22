@@ -1,0 +1,80 @@
+{
+  "date_utc": "2026-10-22",
+  "what": "Live testnet sale with the seller's browser closed: lintel-agent (a separate process, started from the app-format handoff file) ran every seller step; the buyer ran examples/live_agent_sale.rs over the relay HTTP API and public lightwalletd.",
+  "branch": "77190ad9",
+  "buyer": {
+    "content_hash": "62398afd86909517ad4bf267dbec9d6eab4dd2abd0d60daff3af926f73b92f20",
+    "decrypted_bytes_match_sealed_payload": true,
+    "decrypted_matches_content_hash": true,
+    "offer_proof_verified": true,
+    "t_recovered_from_mined_tx": true
+  },
+  "claim_window": {
+    "refund_first_valid_height": 4529956,
+    "settlement_expiry_height": 4529955
+  },
+  "escrow_address": "utest1t0qps8gm7q9t2ducw27a9z6qkqm5jr9ens8s6xzpt4sfwsc4u695ynpg32pkdlmk4efruumvdrehxt9as4atrz9p2mm6cqx7eqxj0m05",
+  "flow": "seller agent: seller browser closed, lintel-agent (separate process) ran the seller side; buyer = examples/live_agent_sale.rs over relay HTTP + lightwalletd",
+  "funding": {
+    "escrow_value": 2020000,
+    "height": 4529902,
+    "lock_coin": {
+      "outpoint": "5ce0e78dd3bd61bfdeb9f09ec4c0fa08f59d97bb4c5fa06d050c40b1ef2f2b8d:0",
+      "value": 20000
+    },
+    "txid": "5ce0e78dd3bd61bfdeb9f09ec4c0fa08f59d97bb4c5fa06d050c40b1ef2f2b8d"
+  },
+  "joint_ak": "bfcb337860a6f6314fb5165d06804f72288d1c448dd65ef5dad55462b557b022",
+  "listing_id": "PxaAfeIJPfgI",
+  "listing_status_after": "sold",
+  "network": "testnet",
+  "pool": "Ironwood",
+  "price_zats": 2000000,
+  "refund_presigned_before_funding": {
+    "co_signed_by": "lintel-agent",
+    "n_lock_time": 4529955,
+    "status": "conflicts with the settlement (same escrow nullifier); never broadcast",
+    "txid": "c522138e626e2f9df2fd8ca4894361e07f69dae604b74de663592a3e5042e521"
+  },
+  "relay": "local (web/relay, node server.js)",
+  "relay_saw_signature": false,
+  "session_id": "6UGatRSqzQUp",
+  "settlement": {
+    "built_signed_proved_broadcast_by": "lintel-agent",
+    "buyer_change": 10000,
+    "expiry_height": 4529955,
+    "height": 4529908,
+    "merchant_received": 2000000,
+    "rk": "2e8f61bee02e0ebe8baf4dccf5eac88d55626451dad1af6f47cb27b25cfe9a0a",
+    "sighash": "c2ac9a7c9ed901d51de5dbaadebf9c14374cb242d7a4ebde2c146657aff50451",
+    "txid": "5104f5af5766142cdeeba4d742b24c37149cbfdeaadbe51dd501d99e7c9aacc2"
+  },
+  "tx_version": "v6",
+  "source_note": {
+    "faucet": "Valar testnet faucet POST /api/claim",
+    "txid": "cda8d138eaf0f66f57495c8c6b4cfa0cc864b8916a46506e777f55cd693ed800",
+    "height": 4529887,
+    "value": 12500000
+  },
+  "buyer_change_from_funding": {
+    "txid": "5ce0e78dd3bd61bfdeb9f09ec4c0fa08f59d97bb4c5fa06d050c40b1ef2f2b8d",
+    "value": 10445000
+  },
+  "seller_processes_during_sale": "only `lintel-agent run` (plus the local relay); the seller command published the listing, wrote the handoff file and exited before the buyer started",
+  "agent_log": [
+    "lintel-agent: watching /workspace/work/live-run/agent-dir (every 5s)",
+    "[1792694838] PxaAfeIJPfgI: escrow key bound (buyer proof checked); escrow address announced",
+    "[1792694848] PxaAfeIJPfgI: refund co-signed (valid only after block 4529955); waiting for the buyer to fund",
+    "[1792694939] PxaAfeIJPfgI: settlement built (pays 2000000 zats to the payout address, expires at 4529955)",
+    "[1792694944] PxaAfeIJPfgI: partial signature sent; waiting for the buyer's pre-signature",
+    "[1792694955] PxaAfeIJPfgI: settlement broadcast: 5104f5af5766142cdeeba4d742b24c37149cbfdeaadbe51dd501d99e7c9aacc2",
+    "[1792695076] PxaAfeIJPfgI: SOLD: settlement mined at block 4529908",
+    "stopping"
+  ],
+  "commands": [
+    "live_agent_sale <dir> seller http://127.0.0.1:8787",
+    "lintel-agent import <dir>/handoff.SECRET.json --dir <agent-dir>",
+    "lintel-agent run --dir <agent-dir> --interval 5",
+    "live_agent_sale <dir> buyer http://127.0.0.1:8787"
+  ]
+}

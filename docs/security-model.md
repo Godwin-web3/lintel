@@ -44,7 +44,7 @@ Chain data goes through a lightwalletd proxy (`LINTEL_LWD`, default `testnet.zec
 ## Known limits
 
 - **Testnet only.** Not for real funds.
-- **The seller must be online to settle.** Settlement needs the seller's app open to co-sign and broadcast before the expiry height. There is no background agent yet. If the seller misses the window, the buyer refunds.
+- **Someone must act for the seller to settle.** Settlement needs the seller's app open, or the seller agent (`lintel-agent`) running, to co-sign the refund and broadcast the settlement before the expiry height. If neither does it in time, the buyer refunds. The agent holds the listing's signing share and adaptor secret, so it must run on a machine the seller controls.
 - **Multi-copy (presale) listings settle off-chain.** The completed signature travels through the relay and no ZEC moves; the sighash and randomizer are placeholders until PCZT settlement is wired for presales, so treat presale copies as free.
 - **Minimal wallet.** The built-in testnet wallet doesn't track spent notes or change across sessions.
 - **Refund state is local.** The signed refund exists only in the buyer's browser storage.
