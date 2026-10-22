@@ -17,6 +17,8 @@ chain = [
 # lightwalletd client for the lintel-chain CLI.
 net = ["chain", "dep:tonic", "dep:tonic-prost", "dep:prost", "dep:tokio", "dep:http"]
 inject = ["chain"]
+# Seller agent: finishes on-chain sales while the app is closed (lintel-agent).
+agent = ["net", "dep:reqwest", "tokio/signal"]
 
 [dependencies]
 blake2b_simd = "1.0"
@@ -48,6 +50,7 @@ tonic-prost = { version = "0.14", optional = true }
 prost = { version = "0.14", optional = true }
 tokio = { version = "1", optional = true, features = ["rt-multi-thread", "macros", "time"] }
 http = { version = "1", optional = true }
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "rustls-tls"] }
 
 [lib]
 name = "lintel"
@@ -65,6 +68,15 @@ required-features = ["inject"]
 [[bin]]
 name = "lintel-chain"
 path = "src/bin/lintel-chain.rs"
+required-features = ["net"]
+
+[[bin]]
+name = "lintel-agent"
+path = "src/bin/lintel-agent.rs"
+required-features = ["agent"]
+
+[[test]]
+name = "agent"
 required-features = ["net"]
 
 [[example]]
