@@ -10,6 +10,7 @@ What works on Zcash testnet today, what does not exist yet, and what has to happ
 | --- | --- | --- |
 | Seal a file and prove it in the browser (Halo 2, no trusted setup) | Works | [How it works](how-it-works.md#2-sealed-goods-verifiable-encryption-under-t) |
 | Payloads up to 1,523,681 bytes, every byte's decryption proven (offer v3, up to 64 parts at k = 15) | Works | [Big payloads](big-payloads.md) |
+| Proven claims: length bounds, magic prefix and bytes at an offset, proven in the same proof as the decryption; the Sell form adds them, the relay shape-checks them, the buyer's browser verifies them and shows them in plain English | Works in the browser; no sale carrying claims has been mined yet | [Proven claims](predicates.md) |
 | Verify a listing's proof in the browser before paying, including a public check with no wallet at `/verify` | Works | [Quickstart](quickstart.md#in-two-minutes) |
 | Single-copy on-chain sale: joint escrow, adaptor-signed settlement, key read from the mined transaction | Works, mined | [Evidence: browser sale](testnet-evidence.md#browser-sale-app-ui-two-browser-contexts) |
 | Time-locked refund (v2), co-signed before funding, rejected by consensus before its lock height | Works, mined | [Evidence: v2 time lock](testnet-evidence.md#v2-time-locked-refund-cli) |
@@ -35,6 +36,7 @@ What works on Zcash testnet today, what does not exist yet, and what has to happ
 | Relay privacy for escrows | Not provided | The relay operator can derive the escrow viewing key from the public session fields and see escrow balances. It cannot spend them. |
 | Fast big-file sealing in a browser tab | Not done | About 100 s per 23.8 KB part single-threaded, so a 1 MB file takes over an hour in a tab. Natively, 1 MB took 9.5 minutes on 2 vCPU. The threaded build was not benchmarked for big offers. |
 | Blob garbage collection on the relay | Not done | Blob uploads are open (size and quota capped) and unreferenced blobs are not removed. |
+| More claim types (signed attestations, dataset predicates) | Design only | `docs/predicates.md` sketches them; only the `Format` predicate (length, prefix, bytes at an offset) is implemented. Claims need offer v3 (a short file with claims pays for one big-part proof) and byte claims must lie in the first 23,777 bytes. |
 | "Proven core + bulk" for files over 1.5 MB | Not done | Everything sold today is fully proven; nothing larger is offered. |
 | Min-value disclosure in the app | Engine only | `engine/src/disclosure.rs` has a tested circuit; the web app does not use it. |
 

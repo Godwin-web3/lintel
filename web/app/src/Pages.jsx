@@ -164,7 +164,7 @@ export function HowItWorks() {
               <li><b>Refund only after the lock height.</b> If the seller never settles, the buyer waits about 60 blocks (roughly 75 minutes), then broadcasts the refund kept in that browser.</li>
               <li><b>Multi-copy listings settle off-chain.</b> On-chain settlement covers single-copy listings; multi-copy sales complete through the relay and move no TAZ.</li>
               <li><b>Big files are slow to seal in a browser.</b> About 100 s per 23.8 KB part in a single-threaded tab, so over an hour for 1 MB. Natively, 1 MB took 9.5 minutes on 2 vCPU. Verifying is fast.</li>
-              <li><b>A hash is not a review.</b> The proof shows the content matches the agreed hash, and any proven claims hold, not that it is worth the price. Claims cover the first 23.8 KB part and are public.</li>
+              <li><b>A hash is not a review.</b> The proof shows the content matches the agreed hash, and any proven claims hold, not that it is worth the price. Byte claims must sit in the first 23.8 KB, and every claim is public.</li>
             </ul>
           </div>
         </div>

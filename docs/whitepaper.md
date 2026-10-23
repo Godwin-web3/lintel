@@ -76,9 +76,13 @@ Parameters `params-big.bin`, 2,097,220 bytes, BLAKE2b (personal `lintel-params-v
 
 **Blobs.** Each v3 part (header, ciphertext, proof) is stored on the relay as a blob named by its SHA-256. The listing carries a manifest of about 170 bytes per part. Integrity is checked by the relay on upload, by the app on download, and by the engine against the manifest before any proof is verified.
 
-### 4.4 What the proofs do not say
+### 4.4 Proven claims (predicates)
 
-They show that the content matches `h`, not that `h` is the content the buyer wants. The buyer needs an out-of-band reason to expect `h`, such as a hash the seller published earlier.
+A v3 offer may carry public claims about the content, proven in part 0 over the same plaintext cells the circuit decrypts and hashes. The implemented predicate, `Format`, covers one length claim (`min ≤ len ≤ max`, with `len` the packed length word) and up to two byte claims (a magic prefix, or 1 to 32 bytes at an offset within the first 23,777 bytes). Each selected 31-byte chunk is decomposed into bytes range-checked with the existing 10-bit lookup, compared under public masks, and three 40-bit range checks give the length bounds and stop a byte claim from pointing into zero padding. The claim parameters (253 field elements) are public inputs, so a changed claim fails verification; claims the seller did not make get vacuous parameters, so one verifying key serves every combination. The circuit stays at k = 15 with the same `params-big.bin`; proving one part costs about 3% more CPU and the proof grows by 64 bytes. Offers without claims use the unchanged circuit, whose verifying key is pinned in a test. Signed attestations and dataset predicates are designs, not code (source: [Proven claims](predicates.md)).
+
+### 4.5 What the proofs do not say
+
+They show that the content matches `h`, and any proven claims about its length and bytes, not that `h` is the content the buyer wants. The claims narrow what a buyer must take on trust (a file that starts with `%PDF-` and is between two lengths), but they say nothing about meaning or quality. The buyer still needs an out-of-band reason to expect `h`, such as a hash the seller published earlier.
 
 ## 5. Adaptor-signature settlement
 
