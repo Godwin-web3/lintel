@@ -10,7 +10,9 @@
   <a href="https://lintel-godwin-web3s-projects.vercel.app/verify">Verify</a> ·
   <a href="https://lintel-godwin-web3s-projects.vercel.app/docs">Docs</a> ·
   <a href="https://lintel-godwin-web3s-projects.vercel.app/whitepaper">Whitepaper</a> ·
-  <a href="https://lintel-godwin-web3s-projects.vercel.app/evidence">Evidence</a>
+  <a href="https://lintel-godwin-web3s-projects.vercel.app/evidence">Evidence</a> ·
+  <a href="https://youtu.be/OxRVMp6467E">Demo video (2:22)</a> ·
+  <a href="docs/compare.md">How Lintel compares</a>
 </p>
 
 <p align="center"><b>Zcash testnet only · unaudited · no mainnet until testnet is solid and reviewed</b></p>
@@ -20,6 +22,21 @@
 Lintel is private conditional settlement on Zcash. A seller seals a file in their browser and publishes a Halo 2 proof that the ciphertext decrypts, under the secret behind a public point `T`, to content with hash `h`. The buyer verifies that proof on their own device (Rust compiled to WebAssembly), then funds a shielded escrow that neither side can spend alone, from the in-browser wallet or from any testnet wallet through a ZIP 321 request. To get paid, the seller (or `lintel-agent`, while the seller is offline) completes a two-party adaptor signature, and that signature reveals the key on chain. If the seller never settles, a refund co-signed before funding becomes valid after its `nLockTime`.
 
 No trusted setup, no custodian, no server-side keys. Files up to 1,523,681 bytes, every byte's decryption proven (offer v3: up to 64 parts at k = 15).
+
+**The problem.** Selling data to a stranger means one side goes first: pay and hope, or deliver and hope. Escrow agents fix that by seeing everything and holding the money. Lintel ties the payment to the delivery instead: the buyer proves to themselves, before paying, what the payment unlocks, and the one transaction that pays the seller is the one that hands over the key.
+
+**Why two parties, no committee.** A sale has exactly one seller and one buyer, so nobody else needs to hold a key. The seller proves on their own device, the buyer verifies on theirs, and the escrow is a shielded Zcash note neither can spend alone. FHE and MPC networks suit computing on many people's hidden data; a one-to-one sale does not need them. Full comparison with trusted escrow, ZKCP on Bitcoin, plain Zcash trades and FHE/MPC data markets: [How Lintel compares](docs/compare.md).
+
+## What is new
+
+Lintel is not new cryptography. It builds on zero-knowledge contingent payments (ZKCP, first run on Bitcoin in 2016), adaptor signatures (scriptless scripts) and Halo 2. As far as we found, these parts are new:
+
+1. **A ZKCP with no hash lock and no trusted setup, on a shielded pool.** The key travels in a two-party RedPallas adaptor signature on an ordinary-looking shielded spend (Ironwood pool, NU7 testnet), and the Halo 2 proof (IPA over Pasta) binds the ciphertext to the adaptor point `T`. Nothing on chain marks the sale as conditional.
+2. **The key does not become public.** ZKCP publishes the key in the redeeming transaction. Lintel masks the seller's partial signature to the buyer, so the mined settlement gives the key to the buyer and seller only.
+3. **Proven claims next to the decryption.** Length bounds, a magic prefix and bytes at an offset are proven in the same proof as the decryption, so the buyer checks what the file is, not only that it opens.
+4. **Sales by agents.** `lintel-agent` settles while the seller's browser is closed, and an MCP server lets AI agents verify and buy under owner-set spending limits.
+
+Not new: verifiable encryption as an idea, contingent payments, adaptor signatures and shielded pools. One honest limit: the buyer (or the seller) can still share the key after the sale; no exchange protocol can stop that.
 
 ## What works today
 
@@ -152,6 +169,22 @@ npm run check:links && npm run build
 ```
 
 Self-host the relay (Render + Upstash) and the app (Vercel): [Self-hosting](docs/self-hosting.md). CLI and seller agent: [CLI reference](docs/cli.md).
+
+## Trust, verified
+
+- **Testnet only, unaudited.** Every claim on this page is a run on Zcash testnet, with its transaction ids in [`docs/testnet/*.json`](docs/testnet) and on [/evidence](https://lintel-godwin-web3s-projects.vercel.app/evidence). There is no mainnet deployment and none is planned until testnet is solid and reviewed ([Production gate](docs/production.md)).
+- **No trusted setup.** Halo 2 with IPA over Pasta; the public parameter files are pinned by digest.
+- **No custodian.** The escrow note needs both parties' signatures. The refund is co-signed before funding and becomes valid after its `nLockTime`, enforced by consensus (an early refund was rejected, then mined after the lock).
+- **The relay sees public data only.** It stores listings, proofs and session messages. Session reads are redacted without the buyer's or seller's token, the seller's `s_b` share is masked to the buyer, and the relay rejects a clear `s_b`. It can stall a sale; it cannot settle one or learn the key.
+- **Keys stay on the device.** Seller and buyer secrets live in the browser (or on the seller's machine for `lintel-agent`), never on a server.
+- **Known gaps are listed, not hidden:** [Not yet](#not-yet), [Threat model](docs/threat-model.md), [Security model](docs/security-model.md).
+
+## Guardrails
+
+- Testnet only. Never describe Lintel as live on mainnet, audited, "trustless" or "untraceable".
+- Real proofs and real transactions only. Never mock a verified proof or a mined sale.
+- Say what the proof covers: the content hash and the proven claims, not whether the content is worth the price.
+- Keep the site, README and docs in sync with the code; facts for contributors and coding agents are in [AGENTS.md](AGENTS.md).
 
 ## Security and contact
 

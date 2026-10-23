@@ -1,0 +1,13 @@
+# Public artifacts that secret scanners flag but that hold no secrets.
+title = "Lintel gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public proving parameters, testnet transaction ids and test fixtures"
+paths = [
+  '''web/app/public/params.*\.bin''',
+  '''docs/testnet/.*\.json''',
+  '''package-lock\.json''',
+]
