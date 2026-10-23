@@ -23,3 +23,14 @@ Please don't open a public issue for anything that could let someone take funds,
 - The app (`web/app/`): key or secret leakage, CSP bypass, anything that makes a user sign or pay for something other than what the UI shows.
 
 Known limits are listed in [docs/security-model.md](docs/security-model.md); reports that extend them are welcome.
+
+## Secret scanner false positives
+
+These are public and hold no secrets:
+
+- `web/app/public/params.bin`, `web/app/public/params-big.bin`: Halo 2 public parameters, pinned by digest
+- `docs/testnet/*.json`: testnet transaction ids, heights and public listing data
+- long `0x…` or 64-character hex strings that are transaction ids or public points
+
+Allowlist: [`.gitleaks.toml`](.gitleaks.toml). If a scanner flags something that is a real key (a device dump, a wallet file, a seed), treat it as leaked: rotate it and purge it from history. Device dumps match `*.SECRET.*` and are git-ignored.
+
