@@ -4,6 +4,7 @@
 import browserSettle from '../../../docs/testnet/evidence-browser-settle.json';
 import browserRefund from '../../../docs/testnet/evidence-browser-refund.json';
 import agentSale from '../../../docs/testnet/evidence-agent-sale.json';
+import privacySale from '../../../docs/testnet/evidence-session-privacy-sale.json';
 import payinT from '../../../docs/testnet/evidence-payin-transparent-sale.json';
 import payinZ from '../../../docs/testnet/evidence-payin-shielded-sale.json';
 import v2Settle from '../../../docs/testnet/evidence-v2-settle.json';
@@ -23,6 +24,14 @@ const payin = (r) => [
 
 /** Newest first. `what` is the run, `why` one line on what it shows. */
 export const RUNS = [
+  {
+    id: 'session-privacy', date: '23 Oct', what: 'Single-copy sale, key kept to the buyer',
+    why: `After the session-privacy change: lintel-agent sent the settlement partial with the seller’s share masked to the buyer, and only the buyer, reading with its token, could open it and recover t from the mined settlement. A read of the same session with no token returned only the stage and the public txids. Refund lock ${n(privacySale.refund_presigned_before_funding.n_lock_time)}.`,
+    rows: [
+      { step: 'Escrow funded', txid: privacySale.funding.txid, h: privacySale.funding.height },
+      { step: 'Settlement by the agent', txid: privacySale.settlement.txid, h: privacySale.settlement.height },
+    ],
+  },
   {
     id: 'pay-in-transparent', date: '22 Oct', what: 'Paid from another wallet, transparent receiver',
     why: 'The buyer had no device wallet: a separate wallet paid the app’s ZIP 321 request to a t-address, and the escrow was funded straight from that coin. The seller side was the agent alone.',

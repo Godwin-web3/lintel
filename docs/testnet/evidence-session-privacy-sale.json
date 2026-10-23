@@ -1,0 +1,61 @@
+{
+  "branch": "77190ad9",
+  "buyer": {
+    "content_hash": "4dd786802efc266bb10b4acb50b711732d8c079ca79565459870b48e98bfb73c",
+    "decrypted_bytes_match_sealed_payload": true,
+    "decrypted_matches_content_hash": true,
+    "offer_proof_verified": true,
+    "t_recovered_from_mined_tx": true
+  },
+  "claim_window": {
+    "refund_first_valid_height": 4531942,
+    "settlement_expiry_height": 4531941
+  },
+  "escrow_address": "utest1taavt85583fgglqhd522nq5622qladaa5kn4tfjdfaysd07ur9xjhrq4ef47ry74yd99w93yhjfrgaqnwajwvup9hhmpsnen4ymsr7rk",
+  "flow": "session privacy (PR #18): seller agent, seller browser closed; lintel-agent (separate process) ran the seller side and sent the settlement partial masked to the buyer (partial wire v2); buyer = examples/live_agent_sale.rs over relay HTTP + lightwalletd, reading the session with its buyer token",
+  "funding": {
+    "escrow_value": 520000,
+    "height": 4531883,
+    "lock_coin": {
+      "outpoint": "31effa433142328bb1dea17c010869efbadf59e6bbee5d50592089c61266f7e7:0",
+      "value": 20000
+    },
+    "txid": "31effa433142328bb1dea17c010869efbadf59e6bbee5d50592089c61266f7e7"
+  },
+  "funding_source": {
+    "kind": "device wallet (Ironwood note)"
+  },
+  "joint_ak": "17c1e4412029cf4f7d28fc45297e3e56a376da73c8c8bfb1cb5307584d34ac17",
+  "listing_id": "-U_JeIDwqek5",
+  "listing_status_after": "sold",
+  "network": "testnet",
+  "pool": "Ironwood",
+  "price_zats": 500000,
+  "refund_presigned_before_funding": {
+    "co_signed_by": "lintel-agent",
+    "n_lock_time": 4531941,
+    "status": "conflicts with the settlement (same escrow nullifier); never broadcast",
+    "txid": "d00f990cc2958fef68b53c590971ae38174a4e7080978081881d113125e7d7e5"
+  },
+  "relay": "local (web/relay, node server.js)",
+  "relay_saw_signature": false,
+  "session_id": "Aqpo6O9lNJ0U",
+  "session_privacy": {
+    "buyer_opened_partial_with_own_key_share": true,
+    "relay_record_alone_gives_t": false,
+    "settlement_partial_wire": "v2 (s_b masked to the buyer: fields enc_sb, r_b, t_point, v, vk_a, vk_b; no s_b in the clear)",
+    "unauthenticated_read_checked": "GET /sessions/Aqpo6O9lNJ0U and GET /listings/-U_JeIDwqek5 with no token against this run's relay state (web/relay at 2fcc029)",
+    "unauthenticated_session_read": "redacted: {redacted: true, stage flags, funding_txid, settle_txid}; no partial, presig, keys or PCZTs"
+  },
+  "settlement": {
+    "built_signed_proved_broadcast_by": "lintel-agent",
+    "buyer_change": 10000,
+    "expiry_height": 4531941,
+    "height": 4531887,
+    "merchant_received": 500000,
+    "rk": "e152cc3d815fd5f770ae7823075eaf6b25b9defa9548caaa6cb6758de7dc4caa",
+    "sighash": "dc0cd0556090eb5846c300b99ed3062f33166cd3770a1721eb5e55db699d7dbd",
+    "txid": "bd7d9d69db555eeb21170a77d36c16332f06d39eb900c34658eb906055d00cdc"
+  },
+  "tx_version": "v6"
+}

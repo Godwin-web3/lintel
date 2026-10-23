@@ -16,7 +16,7 @@ What works on Zcash testnet today, what does not exist yet, and what has to happ
 | Time-locked refund (v2), co-signed before funding, rejected by consensus before its lock height | Works, mined | [Evidence: v2 time lock](testnet-evidence.md#v2-time-locked-refund-cli) |
 | Pay from another wallet (ZIP 321 request, shielded or transparent receiver) | Works, mined | [Evidence: pay from another wallet](testnet-evidence.md#pay-from-another-wallet-buyer-without-a-device-wallet) |
 | Seller agent `lintel-agent`: finishes on-chain sales with the seller's browser closed | Works, mined | [Evidence: seller agent](testnet-evidence.md#seller-agent-sale-sellers-browser-closed) |
-| Key stays with the buyer after a sale: the seller's partial signature is masked to the buyer, session records are served only to buyer and seller | Works, tested offline (engine, WASM, relay) | [Threat model: after the sale](threat-model.md#after-the-sale) |
+| Key stays with the buyer after a sale: the seller's partial signature is masked to the buyer, session records are served only to buyer and seller | Works, mined | [Threat model: after the sale](threat-model.md#after-the-sale), [Evidence: session privacy](testnet-evidence.md#session-privacy-single-copy-sale-with-the-key-kept-to-the-buyer) |
 | Multi-copy (presale) listings, up to 10 copies from the Sell form, buyers order while the seller is offline | Works, off-chain only | [How it works](how-it-works.md#6-multi-copy-presale-listings) |
 | Optional multithreaded browser prover (`LINTEL_THREADS=1` build) | Opt-in, measured for small offers | [Presale, relay and proving](relay-perf.md#d-multithreaded-browser-proving) |
 | Self-hosted relay (Render + Upstash) and app (Vercel) | Works | [Self-hosting](self-hosting.md) |
