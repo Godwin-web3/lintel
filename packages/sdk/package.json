@@ -1,0 +1,84 @@
+{
+  "name": "lintel-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Lintel: seal and sell files with a Halo 2 proof, verify before you pay, and settle atomically on Zcash testnet. Browser and Node.",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "homepage": "https://github.com/Godwin-web3/lintel/blob/main/docs/sdk.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Godwin-web3/lintel.git",
+    "directory": "packages/sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/Godwin-web3/lintel/issues"
+  },
+  "keywords": [
+    "lintel",
+    "zcash",
+    "testnet",
+    "halo2",
+    "zero-knowledge",
+    "adaptor-signatures",
+    "escrow",
+    "zip-321",
+    "wasm",
+    "sdk"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "main": "./dist/node.js",
+  "types": "./dist/node.d.ts",
+  "exports": {
+    ".": {
+      "node": {
+        "types": "./dist/node.d.ts",
+        "default": "./dist/node.js"
+      },
+      "browser": {
+        "types": "./dist/browser.d.ts",
+        "default": "./dist/browser.js"
+      },
+      "default": {
+        "types": "./dist/browser.d.ts",
+        "default": "./dist/browser.js"
+      }
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "wasm/core/lintel_wasm.js",
+    "wasm/core/lintel_wasm.d.ts",
+    "wasm/core/lintel_wasm_bg.wasm",
+    "wasm/chain/lintel_chain.js",
+    "wasm/chain/lintel_chain.d.ts",
+    "wasm/chain/lintel_chain_bg.wasm",
+    "params/params.bin",
+    "params/params-big.bin",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "scripts": {
+    "build:wasm": "bash scripts/build-wasm.sh",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs",
+    "prepublishOnly": "node scripts/prepublish-check.mjs && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

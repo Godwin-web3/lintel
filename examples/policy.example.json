@@ -1,0 +1,9 @@
+{
+  "$comment": "Owner-set limits for the agent example (Zcash testnet). Outlay counted = price + escrow fees + lock coin + funding fee.",
+  "agent": "example-agent",
+  "maxPerPurchaseZec": "0.03",
+  "maxPerDayZec": "0.1",
+  "allowedSellers": "any",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "allowSelling": false
+}

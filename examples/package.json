@@ -1,0 +1,18 @@
+{
+  "name": "lintel-examples",
+  "private": true,
+  "type": "module",
+  "description": "Runnable lintel-sdk examples: seller CLI, buyer verify-and-buy, AI agent over lintel-mcp. Zcash testnet.",
+  "scripts": {
+    "seller": "node seller.mjs",
+    "buyer": "node buyer.mjs",
+    "agent": "node agent.mjs",
+    "rehearsal": "node rehearsal.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "lintel-mcp": "^0.1.0",
+    "lintel-sdk": "^0.1.0"
+  },
+  "license": "MIT OR Apache-2.0"
+}

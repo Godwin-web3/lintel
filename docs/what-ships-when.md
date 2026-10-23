@@ -18,6 +18,7 @@ What works on Zcash testnet today, what does not exist yet, and what has to happ
 | Multi-copy (presale) listings, up to 10 copies from the Sell form, buyers order while the seller is offline | Works, off-chain only | [How it works](how-it-works.md#6-multi-copy-presale-listings) |
 | Optional multithreaded browser prover (`LINTEL_THREADS=1` build) | Opt-in, measured for small offers | [Presale, relay and proving](relay-perf.md#d-multithreaded-browser-proving) |
 | Self-hosted relay (Render + Upstash) and app (Vercel) | Works | [Self-hosting](self-hosting.md) |
+| TypeScript SDK (`lintel-sdk`, Node and browser), `create-lintel-app` starter, MCP server for agents (`lintel-mcp`) with owner-set spending limits | Works, mined (SDK sale) | [SDK](sdk.md#live-on-testnet) · [Agents](agents.md) |
 
 ## Not yet
 
@@ -27,7 +28,8 @@ What works on Zcash testnet today, what does not exist yet, and what has to happ
 | External audit | Not done | The guarantees are backed by tests and live testnet runs, not by an outside review. |
 | On-chain settlement for multi-copy listings | Not done | Presale sales complete through the relay and move no coins; their sighash and randomizer are placeholders. Treat presale copies as free. |
 | Hosted seller agent | Not offered | The agent holds the listing's signing share and adaptor secret, so it runs on a machine the seller controls. |
-| Full wallet | Not done | The built-in testnet wallet only knows notes you scan in by txid and does not track spends made elsewhere. |
+| Full wallet | Not done | The app's built-in testnet wallet only knows notes you scan in by txid and does not track spends made elsewhere (the SDK's `wallet.sync` scans compact blocks and tracks spends). |
+| SDK and MCP on npm | Not published | `lintel-sdk`, `create-lintel-app` and `lintel-mcp` build from this repo; publishing needs the maintainer's npm account. |
 | Refund backup | Not done | The signed refund lives only in the buyer's browser storage. Clearing site data while an escrow is open loses it. |
 | Confidentiality after a sale | Not provided | After a single-copy sale settles, the key can be computed by anyone who reads the sale's public session record on the relay together with the mined settlement. Lintel guarantees a fair exchange, not exclusivity after it. See the [Threat model](threat-model.md#after-the-sale). |
 | Relay privacy for escrows | Not provided | The relay operator can derive the escrow viewing key from the public session fields and see escrow balances. It cannot spend them. |

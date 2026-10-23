@@ -1,0 +1,55 @@
+{
+  "network": "testnet",
+  "driven_by": "lintel-sdk 0.1.0 (Node, WASM engine), seller and buyer in separate stores",
+  "started": "2026-10-23T07:09Z",
+  "seller_payout_address": "utest13jnnmze3te7pgnuzc3j6wcckemjawul82yv0ak6htxysgtknnxjxmau93qvayttwrcna9qmqlppjmjwl0ecydv4aycg8han2acjj30uq",
+  "listing_id": "N3fjV6mVXPcg",
+  "price_taz": "0.001",
+  "buyer_balance_before_taz": "0.04225",
+  "verify_ms": 830,
+  "decrypted_matches": true,
+  "escrow_address": "utest1z8jwqxjm65lfuhsuj625rwlk230zah877v03h9hrywv8spxxmpn22xtqrt2cev0xfm0az6sl5jq6j2a3dptfmmx8c2slfcesdgxuzqht",
+  "funding": {
+    "txid": "9fd8f727fb30d57129326dffa8a1a0663630991e46545cda7765742ee7803e9d",
+    "height": 4531679
+  },
+  "settlement": {
+    "txid": "45168ffdc54440f3181b0ec6863b0b5ed830e4768e4c175a42c50808dd2ec8da",
+    "height": 4531685,
+    "terms": {
+      "kind": "settle",
+      "pay_to": "utest13jnnmze3te7pgnuzc3j6wcckemjawul82yv0ak6htxysgtknnxjxmau93qvayttwrcna9qmqlppjmjwl0ecydv4aycg8han2acjj30uq",
+      "amount": 100000,
+      "change_to": "utest15uqxep24rvaxnlzax0w5c4xw5tdc3a5w5vw7gd7jeyj2shqv2qs0mcq448f3w32089h2ltn827qjhvdfhmaat6ztm8f8fuggzs6y39hs",
+      "target_height": 4531679,
+      "expiry_height": 4531735
+    }
+  },
+  "refund_presigned_before_funding": {
+    "n_lock_time": 4531735,
+    "settle_expiry": 4531735,
+    "status": "kept in the buyer store; conflicts with the mined settlement (same escrow nullifier)"
+  },
+  "seller_paid_taz": "0.001",
+  "relay_saw": [
+    "escrow_address",
+    "funding_txid",
+    "merchant_address",
+    "merchant_contrib",
+    "payer_address",
+    "payer_contrib",
+    "payer_pok",
+    "refund_partial",
+    "refund_pczt",
+    "refund_r_a",
+    "refund_terms",
+    "settle_pczt",
+    "settle_r_a",
+    "settle_terms",
+    "settle_txid"
+  ],
+  "t_source": "mined settlement transaction via relay GET /chain/tx/:txid, verified by the buyer (Payer.unlockFromTx)",
+  "finished": "2026-10-23T07:15Z",
+  "elapsed_s": 376,
+  "notes": "Seller and buyer each ran lintel-sdk step() loops in one Node process with separate FileStores; relay was web/relay/server.js locally, proxying the public testnet lightwalletd. Buyer funded from the store wallet (wallet.sync found its notes)."
+}

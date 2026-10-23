@@ -92,6 +92,27 @@ Read more: [Whitepaper](docs/whitepaper.md) · [Protocol](docs/how-it-works.md) 
 - **Full sale:** two browser profiles and some faucet TAZ. [Quickstart](docs/quickstart.md#full-sale-on-testnet)
 - **Test it and report what breaks:** [tester guide](https://lintel-godwin-web3s-projects.vercel.app/testers) · [open an issue](https://github.com/Godwin-web3/lintel/issues/new?template=bug_report.md)
 
+## Build on Lintel
+
+| Package | What |
+| --- | --- |
+| [`lintel-sdk`](packages/sdk) | TypeScript SDK (Node and browser): seal and list, verify proofs, fund (in-app wallet or ZIP 321), watch, settle, refund. [Reference](docs/sdk.md) |
+| [`create-lintel-app`](packages/create-lintel-app) | `npm create lintel-app`: a Vite starter that verifies and buys a listing on testnet |
+| [`lintel-mcp`](packages/mcp) | MCP server: AI agents browse, verify, buy and sell under owner-set spending limits; keys stay server-side. [Guide](docs/agents.md) |
+| [`examples/`](examples) | Seller CLI, buyer verify-and-buy, AI agent, off-chain rehearsal |
+
+```js
+import { createLintel } from 'lintel-sdk';
+const lintel = await createLintel();                  // hosted testnet relay
+await lintel.verify(listingId);                       // Halo 2 proof checked locally
+for await (const s of lintel.buy(listingId, { funding: 'payin' }).watch()) {
+  if (s.payment) console.log(s.payment.uri);          // pay from any testnet wallet (ZIP 321)
+  if (s.done) console.log(new TextDecoder().decode(s.plaintext));
+}
+```
+
+The packages are not on npm yet; build them from this repo (`npm install && npm run build` at the root; the SDK's WASM with `npm run build:wasm -w lintel-sdk`). A full on-chain sale driven only by the SDK is recorded in [docs/testnet/evidence-sdk-sale.json](docs/testnet/evidence-sdk-sale.json).
+
 ## Architecture
 
 ```
@@ -102,6 +123,8 @@ lintel/
   wasm/              The engine for the browser (crate `lintel-wasm`), optional threaded build
   web/relay/         Public-data relay and lightwalletd proxy (Node); never sees keys, t or plaintext
   web/app/           Site, marketplace (/app), public verifier (/verify) and docs (React + Vite)
+  packages/          TypeScript: lintel-sdk, lintel-mcp (MCP server), create-lintel-app (Vite starter)
+  examples/          Runnable SDK examples: seller, buyer, AI agent, off-chain rehearsal
   docs/              Documentation, whitepaper, blog, testnet records (docs/testnet/*.json)
   brand/             Brand kit: logos, tokens.css, fonts
 ```
