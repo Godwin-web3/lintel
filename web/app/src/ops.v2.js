@@ -4,10 +4,11 @@ export function v2ops(lib, ready, { ensureBig, proveAll } = {}) {
   const L = () => lib();
   return {
     // Copy above maxPayloadV2(): offer v3 (blobs uploaded by the app, manifest in the unit).
-    async sealUnitBig({ payload }, progress) {
+    // `claims` (optional): JSON array proven inside part 0 (predicates).
+    async sealUnitBig({ payload, claims }, progress) {
       await ensureBig();
       const { unit, secret } = JSON.parse(L().presaleNewUnit());
-      const sealer = new (L().BigSealer)(JSON.parse(secret).s, payload);
+      const sealer = new (L().BigSealer)(JSON.parse(secret).s, payload, claims || undefined);
       progress({ part: 0, parts: sealer.parts(), ms: 0 });
       const blobs = proveAll(sealer, progress);
       unit.offer = sealer.manifest();

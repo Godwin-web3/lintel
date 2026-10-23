@@ -9,6 +9,7 @@ Lintel is built so that the two parties never have to trust each other or the re
 | Guarantee | Why it holds |
 | --- | --- |
 | **The buyer knows what they are paying for before paying.** | The seller publishes a Halo 2 proof that the ciphertext decrypts, under the secret behind `T = [t]·G`, to content with hash `h` (and, for disclosure listings, that a hidden value meets a stated minimum). The buyer verifies it on their own device. |
+| **Proven claims are true of the content the buyer unlocks.** | A claim (length bounds, magic prefix, bytes at an offset) is proven by part 0's proof over the same plaintext cells it decrypts and hashes, with the claim as public input. Changing, adding or stripping a claim makes that proof fail, so the relay cannot alter claims undetected. See [Proven claims](predicates.md). |
 | **The seller can't be paid without handing over the key.** | The escrow spends only with a signature from the joint key. The buyer's half is an adaptor pre-signature locked to `T`; completing it requires `t`, and the completed signature is published in the settlement transaction, where the buyer reads it and computes `t`. |
 | **The buyer can't take the content without paying.** | `t` exists only on the seller's device until the seller chooses to settle. The ciphertext alone reveals nothing. |
 | **The buyer's money isn't stuck if the seller disappears.** | Before the buyer funds the escrow, the seller co-signs a refund. In v2 it spends both the escrow and a small transparent lock coin with `nLockTime` set past the settlement expiry, so consensus rejects it until the seller's claim window has closed (verified live: an early refund was rejected with "transaction is locked until after block height"). |
@@ -49,6 +50,7 @@ Chain data goes through a lightwalletd proxy (`LINTEL_LWD`, default `testnet.zec
 - **Minimal wallet.** The built-in testnet wallet only knows notes you scan in by txid and doesn't track spends made elsewhere. Pay-in wallets do scan the chain for their own payments, change and refunds.
 - **Refund state is local.** The signed refund exists only in the buyer's browser storage.
 - **Relay privacy.** As above, the relay operator can view escrows.
+- **Claims are narrow and public.** Claims cover only part 0 (the first 23,777 bytes), at most one length and two byte claims of up to 32 bytes; the bytes a prefix or offset claim names are revealed to everyone. A claim states what bytes are there, not that the content is useful.
 - **Big-offer blobs live on the relay.** A relay that loses or withholds a blob stalls a sale before payment (the buyer cannot verify, so does not pay); a swapped or tampered blob is rejected by its SHA-256 name and by the proofs. Blob uploads are open (size- and quota-capped) and not garbage-collected yet.
 
 ## Reporting a vulnerability

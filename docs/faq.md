@@ -18,6 +18,9 @@ No. Lintel makes the exchange fair, but after a single-copy sale settles the key
 **What does the proof actually prove?**
 That the ciphertext decrypts, under the secret behind the listed point `T`, to content whose hash is the listed `h`. It doesn't prove the content is useful to you; it proves you'll get exactly the content the seller committed to.
 
+**Can the proof say anything about what is inside?**
+Yes, within limits. A seller can add proven claims: the length is between two bounds, the file starts with given bytes (such as `%PDF`), or the bytes at an offset equal a public value (such as a contract address in a report header). They are proven in the same proof, over the same bytes, and the app shows them next to the verified proof. They cover the first 23.8 KB. See [Proven claims](predicates.md).
+
 **Can the seller take my money and not give me the file?**
 No. Getting paid requires completing your pre-signature with `t`, and the completed signature lands on-chain, where your app reads it and computes `t`.
 

@@ -77,7 +77,11 @@ const need = (cond, msg) => { if (!cond) throw new Bad(msg); };
 // Returns the payload ceiling the offer allows.
 async function checkOffer(offerStr) {
   let o; try { o = JSON.parse(offerStr); } catch { throw new Bad('offer must be JSON'); }
-  if (!o || o.v !== 3) return null; // v1/v2 offers carry everything inline
+  if (!o || o.v !== 3) { // v1/v2 offers carry everything inline
+    need(o?.predicates === undefined, 'claims (predicates) need an offer v3');
+    return null;
+  }
+  checkPredicates(o.predicates);
   need(o.n === BIG_N, `offer v3 parts must hold ${BIG_N} elements`);
   need(isHex(o.t_point, 64) && isHex(o.content_hash, 64), 'offer v3 needs t_point and content_hash');
   need(Array.isArray(o.parts) && o.parts.length >= 1 && o.parts.length <= BIG_MAX_PARTS, `offer v3 has 1..${BIG_MAX_PARTS} parts`);
@@ -88,6 +92,31 @@ async function checkOffer(offerStr) {
     need(await blobs.has(p.blob), `blob ${p.blob.slice(0, 12)}… is not uploaded`);
   }
   return MAX_PAYLOAD_BIG;
+}
+
+// Claims proven in part 0 of an offer v3 (engine `predicate::Claim`). Shape
+// checks only; the buyer's app verifies the proof against them, and a claim
+// changed here would make that proof fail.
+const CLAIM_LEN_LIMIT = 2 ** 40;
+function checkPredicates(ps) {
+  if (ps === undefined) return;
+  need(Array.isArray(ps) && ps.length >= 1 && ps.length <= 3, 'offer v3 predicates: 1..3 claims');
+  let lengths = 0, bytes = 0;
+  const uint = (v) => Number.isSafeInteger(v) && v >= 0;
+  for (const c of ps) {
+    need(c && typeof c === 'object' && !Array.isArray(c), 'claim must be an object');
+    const keys = Object.keys(c).sort().join(',');
+    if (c.id === 'length') {
+      need(keys === 'id,max,min' && uint(c.min) && uint(c.max) && c.min <= c.max && c.max < CLAIM_LEN_LIMIT, 'length claim needs 0 <= min <= max < 2^40');
+      lengths++;
+    } else if (c.id === 'prefix' || c.id === 'bytes_at') {
+      need(keys === (c.id === 'prefix' ? 'hex,id' : 'hex,id,offset'), `${c.id} claim has unexpected fields`);
+      need(isHex(c.hex) && c.hex.length <= 64, `${c.id} claim needs 1..32 bytes of hex`);
+      if (c.id === 'bytes_at') need(uint(c.offset), 'bytes_at claim needs an offset');
+      bytes++;
+    } else throw new Bad('unknown claim id');
+  }
+  need(lengths <= 1 && bytes <= 2, 'at most one length claim and two byte claims');
 }
 
 function publicListing(l, { offers = false } = {}) {

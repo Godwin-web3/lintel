@@ -84,4 +84,25 @@ test('presale listing and extra copies with v3 offers', async () => {
   assert.equal((await call('POST', '/listings', { version: 2, title: 'x', price_zec: '0.01', content_hash: h32('a'), size: 7906, unit: unit('8', '{"v":2}') })).status, 400);
 });
 
+test('offer v3 claims (predicates): shape checked, only on v3', async () => {
+  const parts = [blob(30)];
+  for (const b of parts) await put(sha(b), b);
+  const listing = (offer) => ({ title: 'Claims', price_zec: '0.01', content_hash: h32('a'), merchant_vk: h32('b'), t_point: h32('c'), offer, size: 9000 });
+  const withClaims = (predicates) => JSON.stringify({ ...JSON.parse(manifest(parts)), predicates });
+  const good = [{ id: 'prefix', hex: '25504446' }, { id: 'length', min: 100, max: 20000 }, { id: 'bytes_at', offset: 40, hex: 'ab'.repeat(32) }];
+  let r = await call('POST', '/listings', listing(withClaims(good)));
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  // Claims survive in the stored manifest for the buyer's app.
+  const g = await call('GET', `/listings/${r.json.listing.id}`);
+  assert.deepEqual(JSON.parse(g.json.listing.offer).predicates, good);
+  for (const bad of [
+    [], [{ id: 'regex', hex: '00' }], [{ id: 'prefix', hex: 'ab'.repeat(33) }], [{ id: 'prefix', hex: 'xyz' }],
+    [{ id: 'length', min: 5, max: 4 }], [{ id: 'length', min: 0, max: 2 ** 40 }], [{ id: 'length', min: 1, max: 2, extra: 1 }],
+    [{ id: 'bytes_at', hex: '00' }], [{ id: 'length', min: 1, max: 2 }, { id: 'length', min: 1, max: 2 }],
+    [{ id: 'prefix', hex: '00' }, { id: 'prefix', hex: '00' }, { id: 'prefix', hex: '00' }], 'x',
+  ]) assert.equal((await call('POST', '/listings', listing(withClaims(bad)))).status, 400, JSON.stringify(bad));
+  // Claims on an inline (v1/v2) offer: refused.
+  assert.equal((await call('POST', '/listings', { ...listing('{"v":2,"predicates":[]}'), size: 100 })).status, 400);
+});
+
 test.after(() => server.close());

@@ -65,7 +65,18 @@ function ensureBig() {
   return bigLoad.catch((e) => { bigLoad = null; throw e; });
 }
 const NEEDS_KEYS = new Set(['verifyOffer', 'unlock', 'unlockFromTx', 'verifyUnit', 'buyerOrder', 'buyerUnlock']);
-const isBig = (v) => typeof v === 'string' && v.includes('"v":3');
+// True when `v` is (or wraps) an offer v3. The offer arrives inline as JSON,
+// or nested as the JSON-string `offer` of a presale unit (escaped quotes), so
+// parse each layer and check the version field instead of matching substrings.
+const isBig = (v, depth = 0) => {
+  if (depth > 3 || v == null) return false;
+  if (typeof v === 'string') {
+    try { return isBig(JSON.parse(v), depth + 1); } catch { return false; }
+  }
+  if (typeof v !== 'object') return false;
+  if (v.v === 3) return true;
+  return v.offer != null && isBig(v.offer, depth + 1);
+};
 
 // Proves every part of a BigSealer, reporting progress; returns the blobs.
 function proveAll(sealer, progress) {
@@ -101,10 +112,11 @@ const ops = {
   // ---- seller ----
   // Single-copy listing (on-chain flow) above maxPayloadBytes(): offer v3.
   // Returns the manifest as `offer` plus the blobs the app must upload first.
-  async sealBig({ payload }, progress) {
+  // `claims` (optional): JSON array proven inside part 0 (predicates, offer v3 only).
+  async sealBig({ payload, claims }, progress) {
     await ensureBig();
     const m = new L.Merchant();
-    const sealer = m.bigSealer(payload);
+    const sealer = m.bigSealer(payload, claims || undefined);
     progress({ part: 0, parts: sealer.parts(), ms: 0 });
     const blobs = proveAll(sealer, progress);
     const out = { offer: sealer.manifest(), blobs, contentHash: L.contentHashBig(payload), tPoint: m.tPoint(), merchantVk: m.verificationKey(), state: m.exportState() };
@@ -143,7 +155,12 @@ const ops = {
     return m.complete(presig, partial);
   },
 
+  // Seller-side check of claims against the payload; returns [{ claim, text }].
+  async checkClaims({ claims, payload }) { await ready; return JSON.parse(L.checkClaims(claims, payload)); },
+
   // ---- buyer ----
+  // Claims an offer carries, in plain English. Show only after verifyOffer passed.
+  async offerClaims({ offer }) { await ready; return JSON.parse(L.offerClaims(offer)); },
   async verifyOffer({ offer, contentHash }) {
     await ready;
     ensureV1();

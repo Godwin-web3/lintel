@@ -59,6 +59,8 @@ Public inputs are `[T.x, T.y, h, c_0 … c_63]`. The buyer runs `verify_offer` a
 
 **What the proof does not say:** it shows the content matches `h`, not that `h` is the content the buyer wants. The buyer needs to know which hash to expect, for example one the seller published or someone attested out of band.
 
+**Proven claims** narrow that gap. A seller can attach public claims to a v3 offer: the payload's length lies between two bounds, it starts with given bytes (a file signature such as `%PDF`), or the bytes at an offset equal a public value. Part 0's proof is then made with a second circuit (`predicate::Format`) that adds those checks over the same plaintext cells it decrypts and hashes, with the claim's parameters as extra public inputs. The buyer's app verifies part 0 against the claims and shows them in plain English next to the verified proof. Offers without claims use the unchanged circuit. See [Proven claims](predicates.md).
+
 ## 3. Min-value disclosure (engine only)
 
 `engine/src/disclosure.rs` contains a second Halo 2 circuit for selective disclosure: it proves `value ≥ min` (a 64-bit range check on `value − min`) and that `C = Poseidon(value, blind, txid_lo, txid_hi)`, with public inputs `[min, txid_lo, txid_hi, C]`. Binding the txid means a proof for one transaction does not verify for another. The circuit has real prove and verify tests, but the web app does not use it yet.

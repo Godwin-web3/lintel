@@ -20,10 +20,13 @@ export const MAX_COPIES = 10;
 // ciphertext + proofs in content-addressed relay blobs). Same as maxPayloadV2().
 export const V2_MAX = 7905;
 
-/** Seals one copy (v2 inline, or v3 with its blobs uploaded). `onPart({ part, parts, ms })`. */
-async function sealCopy(payload, onPart) {
-  if (payload.length <= V2_MAX) return crypto('sealUnit', { payload });
-  const r = await crypto('sealUnitBig', { payload }, onPart);
+/**
+ * Seals one copy (v2 inline, or v3 with its blobs uploaded). `onPart({ part, parts, ms })`.
+ * Claims (JSON array) are proven in part 0, which needs offer v3 at any size.
+ */
+async function sealCopy(payload, onPart, claims) {
+  if (payload.length <= V2_MAX && !claims) return crypto('sealUnit', { payload });
+  const r = await crypto('sealUnitBig', { payload, claims }, onPart);
   await putBlobs(r.blobs, (done, total) => onPart({ uploaded: done, blobs: total }));
   return r;
 }
@@ -31,11 +34,11 @@ async function sealCopy(payload, onPart) {
 // ---------- seller ----------
 
 /** Seals `copies` units and publishes them. `onStep(i, n, ms)` reports progress. */
-export async function sellV2({ payload, copies, meta, onStep = () => {}, onPart = () => {} }) {
+export async function sellV2({ payload, copies, meta, claims, onStep = () => {}, onPart = () => {} }) {
   let listing = null, token = null;
   for (let i = 0; i < copies; i++) {
     const t0 = performance.now();
-    const { unit, secret, contentHash } = await sealCopy(payload, (p) => onPart(i + 1, copies, p));
+    const { unit, secret, contentHash } = await sealCopy(payload, (p) => onPart(i + 1, copies, p), claims);
     // Keep the secret before publishing: a published unit without its secret
     // could take an order nobody can complete.
     const keep = (lid) => store.put((st) => {
@@ -62,11 +65,15 @@ export async function addCopies({ listingId, payload, copies, onStep = () => {},
   const mine = store.get().selling[listingId];
   if (!mine || mine.v !== 2) throw new Error('seller keys for this listing are not on this device');
   const { listing } = await relay('GET', `/listings/${listingId}`);
-  const h = await crypto(payload.length > V2_MAX ? 'contentHashBig' : 'contentHashV2', { payload });
+  // New copies carry the same claims as the first one (claims force offer v3).
+  const first = (await relay('GET', `/listings/${listingId}/units/0`)).unit;
+  const preds = JSON.parse(first.offer).predicates;
+  const claims = preds ? JSON.stringify(preds) : undefined;
+  const h = await crypto(payload.length > V2_MAX || claims ? 'contentHashBig' : 'contentHashV2', { payload });
   if (h !== listing.content_hash) throw new Error('this content does not match the listing (different hash)');
   for (let i = 0; i < copies; i++) {
     const t0 = performance.now();
-    const { unit, secret } = await sealCopy(payload, (p) => onPart(i + 1, copies, p));
+    const { unit, secret } = await sealCopy(payload, (p) => onPart(i + 1, copies, p), claims);
     store.put((st) => { st.selling[listingId].units[unit.r_b] = { secret }; });
     await relay('POST', `/listings/${listingId}/units`, { unit }, mine.token);
     onStep(i + 1, copies, Math.round(performance.now() - t0));
@@ -153,7 +160,9 @@ export async function verifyListing(listing) {
   const { unit } = await relay('GET', `/listings/${listing.id}/units/${open.index}`);
   const t0 = performance.now();
   await crypto('verifyUnit', { unit: JSON.stringify(await resolveUnit(unit)), contentHash: listing.content_hash });
-  return { ms: Math.round(performance.now() - t0), parts: JSON.parse(unit.offer).parts.length };
+  // Claims are proven about content with the listing's hash, so they hold for every copy that verifies.
+  const claims = await crypto('offerClaims', { offer: unit.offer });
+  return { ms: Math.round(performance.now() - t0), parts: JSON.parse(unit.offer).parts?.length || 1, claims };
 }
 
 /**

@@ -149,6 +149,7 @@ export function HowItWorks() {
             <h3><span className="chip ok">Enforced</span></h3>
             <ul className="ticks good">
               <li><b>Proof before payment.</b> A wrong file, tampered ciphertext, a missing or swapped part, or a key not bound to the payment all fail verification on the buyer’s device.</li>
+              <li><b>Claims are proven, not promised.</b> A seller can add public claims (starts with <code>%PDF</code>, length between two bounds, given bytes at an offset). They are proven in the same proof as the decryption, over the same bytes; a changed or false claim fails. <Link to="/docs/predicates">Proven claims</Link></li>
               <li><b>Neither side settles alone.</b> The escrow’s spend key is the sum of both shares; a spend needs a signature only both together can make.</li>
               <li><b>The key comes from the chain.</b> The buyer extracts <code>t</code> from the mined settlement and verifies the signature itself. The relay is not trusted for it.</li>
               <li><b>A refund exists before funding.</b> Consensus rejects it until the settlement window closes, so the refund and the settlement are never valid at the same height.</li>
@@ -163,7 +164,7 @@ export function HowItWorks() {
               <li><b>Refund only after the lock height.</b> If the seller never settles, the buyer waits about 60 blocks (roughly 75 minutes), then broadcasts the refund kept in that browser.</li>
               <li><b>Multi-copy listings settle off-chain.</b> On-chain settlement covers single-copy listings; multi-copy sales complete through the relay and move no TAZ.</li>
               <li><b>Big files are slow to seal in a browser.</b> About 100 s per 23.8 KB part in a single-threaded tab, so over an hour for 1 MB. Natively, 1 MB took 9.5 minutes on 2 vCPU. Verifying is fast.</li>
-              <li><b>A hash is not a review.</b> The proof shows the content matches the agreed hash, not that it is worth the price.</li>
+              <li><b>A hash is not a review.</b> The proof shows the content matches the agreed hash, and any proven claims hold, not that it is worth the price. Byte claims must sit in the first 23.8 KB, and every claim is public.</li>
             </ul>
           </div>
         </div>
@@ -188,7 +189,7 @@ export function HowItWorks() {
 // ---------------------------------------------------------------- /use-cases
 
 const USES = [
-  ['Bug-bounty reports', 'Publish the hash of your report, then show the protocol a proof that the sealed report matches it. Payment and disclosure happen in one step, so neither side has to go first.'],
+  ['Bug-bounty reports', 'Publish the hash of your report, then show the protocol a proof that the sealed report matches it. A proven claim can show the report names their contract address at a fixed offset. Payment and disclosure happen in one step, so neither side has to go first.'],
   ['Datasets', 'Sell a sample or a full dataset up to 1.5 MB with every byte proven. For something larger, sell the key to a file hosted anywhere: the proof then covers the key, not the file.'],
   ['Research', 'Release findings to whoever pays, with proof that the text is exactly the one you committed to earlier.'],
   ['Digital goods', 'Licence keys, access codes, files. On multi-copy listings each copy has its own unlock key, so one sale never opens another.'],

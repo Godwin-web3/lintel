@@ -179,7 +179,7 @@ impl Merchant {
     /// Seals a payload of any size up to `maxPayloadBig()` as offer v3 under
     /// this listing's adaptor secret, one proof per `provePart` call.
     #[wasm_bindgen(js_name = bigSealer)]
-    pub fn big_sealer(&self, payload: &[u8]) -> R<big::BigSealer> { big::BigSealer::from_secret(self.secret, payload) }
+    pub fn big_sealer(&self, payload: &[u8], claims: Option<String>) -> R<big::BigSealer> { big::BigSealer::from_secret(self.secret, payload, claims) }
 
     /// Proof of knowledge of the key share, bound to both keys and the session.
     #[wasm_bindgen(js_name = proveKnowledge)]

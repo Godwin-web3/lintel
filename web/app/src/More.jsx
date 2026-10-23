@@ -214,7 +214,7 @@ export function Pitch() {
       <Band id="solution" label="02 · Solution" title="Proof, escrow and key in one construction."
         intro={<>All three are locked to the same secret. <Link to="/whitepaper">Whitepaper</Link></>}>
         <div className="steps3">
-          <div><span className="num">01</span><h3>Seal and prove</h3><p>Halo 2 proofs that the ciphertext opens, under the secret behind <code>T</code>, to content with hash <code>h</code>. Up to 1,523,681 bytes, every byte proven.</p></div>
+          <div><span className="num">01</span><h3>Seal and prove</h3><p>Halo 2 proofs that the ciphertext opens, under the secret behind <code>T</code>, to content with hash <code>h</code>. Up to 1,523,681 bytes, every byte proven, plus optional proven claims about length and bytes.</p></div>
           <div><span className="num">02</span><h3>Verify, then pay</h3><p>The buyer’s device checks the proofs, then funds a shielded escrow neither side can spend alone, with a time-locked refund co-signed first.</p></div>
           <div><span className="num">03</span><h3>Settlement reveals the key</h3><p>The seller’s adaptor signature completes the payment and publishes the key in the same transaction.</p></div>
         </div>

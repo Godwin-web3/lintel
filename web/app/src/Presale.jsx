@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { relay, store } from './api.js';
 import { useTitle } from './site.jsx';
 import { orderV2, awaitUnlock, purchases, verifyListing, addCopies, MAX_COPIES } from './presale.js';
+import { ClaimList } from './claims.jsx';
 
 const short = (h) => (h ? `${h.slice(0, 10)}…${h.slice(-6)}` : '');
 const fmtBytes = (n) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`);
@@ -89,6 +90,7 @@ export function ListingV2({ data, boot, Steps, Notice, reload }) {
           {verify.state === 'idle' && 'Waiting for the prover…'}
           {verify.state === 'run' && 'Verifying the Halo 2 proof on this device…'}
           {verify.state === 'ok' && <><b>Proof verified</b> in <span className="mono">{verify.ms} ms</span> ({verify.parts} part{verify.parts > 1 ? 's' : ''}). The file matches the listing: each copy decrypts, under its own unlock secret, to content with this exact hash. The copy you order is checked again before you pre-sign.</>}
+          {verify.state === 'ok' && verify.claims?.length > 0 && <div className="claims-proven"><b>Also proven about that content:</b><ClaimList claims={verify.claims} /></div>}
           {verify.state === 'bad' && <><b>Proof rejected:</b> {verify.error}. Do not buy.</>}
         </div>
       </div>
