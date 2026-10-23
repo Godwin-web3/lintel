@@ -53,8 +53,9 @@ export class RelayClient {
 
   constructor(url: string = HOSTED_RELAY, opts: { fetch?: FetchLike } = {}) {
     this.url = url.replace(/\/$/, '');
-    this.fetch = opts.fetch ?? (globalThis.fetch as unknown as FetchLike);
-    if (!this.fetch) throw new Error('no fetch available; pass opts.fetch');
+    // call through globalThis: a bare reference to window.fetch throws "Illegal invocation" in browsers
+    this.fetch = opts.fetch ?? (((input, init) => (globalThis.fetch as any)(input, init)) as FetchLike);
+    if (!opts.fetch && typeof globalThis.fetch !== 'function') throw new Error('no fetch available; pass opts.fetch');
   }
 
   /**

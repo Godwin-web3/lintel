@@ -13,7 +13,16 @@
   "bugs": {
     "url": "https://github.com/Godwin-web3/lintel/issues"
   },
-  "keywords": ["lintel", "mcp", "model-context-protocol", "ai-agents", "zcash", "testnet", "spending-limits", "zero-knowledge"],
+  "keywords": [
+    "lintel",
+    "mcp",
+    "model-context-protocol",
+    "ai-agents",
+    "zcash",
+    "testnet",
+    "spending-limits",
+    "zero-knowledge"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -30,7 +39,8 @@
     "./policy": {
       "types": "./dist/policy.d.ts",
       "default": "./dist/policy.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",

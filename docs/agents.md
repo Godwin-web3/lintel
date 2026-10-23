@@ -25,6 +25,8 @@ Add it to an MCP client (stdio):
 }
 ```
 
+Sealing a file and the on-chain steps can take minutes (each Halo 2 or Orchard proof runs on one thread). `lintel_purchase_status` and `lintel_sale_status` return after at most `waitSeconds`; give `lintel_sell` and `lintel_buy` a generous tool timeout in your MCP client.
+
 Over HTTP instead (streamable HTTP at `/mcp`, bearer token required, binds to 127.0.0.1 unless `LINTEL_MCP_HTTP_HOST` says otherwise):
 
 ```sh

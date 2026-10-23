@@ -36,7 +36,7 @@ const transport = new StdioClientTransport({
 const client = new Client({ name: 'lintel-example-agent', version: '0.1.0' });
 await client.connect(transport);
 const call = async (name, args = {}) => {
-  const r = await client.callTool({ name, arguments: args });
+  const r = await client.callTool({ name, arguments: args }, undefined, { timeout: 15 * 60 * 1000 }); // proving can take minutes
   const out = JSON.parse(r.content[0].text);
   if (r.isError) throw new Error(`${name}: ${out.error}`);
   return out;
@@ -101,7 +101,7 @@ async function llm(want) {
     const results = [];
     for (const u of uses) {
       log(`tool ${u.name} ${JSON.stringify(u.input)}`);
-      const r = await client.callTool({ name: u.name, arguments: u.input });
+      const r = await client.callTool({ name: u.name, arguments: u.input }, undefined, { timeout: 15 * 60 * 1000 });
       results.push({ type: 'tool_result', tool_use_id: u.id, content: r.content[0].text, is_error: !!r.isError });
     }
     messages.push({ role: 'user', content: results });

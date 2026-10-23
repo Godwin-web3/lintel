@@ -35,7 +35,7 @@ async function agent({ policy, mode = 'relay', store = new MemoryStore(), name =
   const client = new Client({ name: 'test-agent', version: '0' });
   await Promise.all([server.connect(a), client.connect(b)]);
   const call = async (name, args = {}) => {
-    const r = await client.callTool({ name, arguments: args });
+    const r = await client.callTool({ name, arguments: args }, undefined, { timeout: 15 * 60 * 1000 }); // sealing/proving can take minutes
     outputs.push(r.content[0].text);
     return { ...JSON.parse(r.content[0].text), isError: !!r.isError };
   };
@@ -108,7 +108,7 @@ test('buy within limits: settles, saves content, logs, and the daily cap then bi
   assert.equal(limits.remaining_today_taz, '0.00945');
   const statuses = (await a.call('lintel_spending_report')).entries.map((e) => e.status).reverse();
   assert.deepEqual(statuses, ['reserved', 'settled']);
-  const { id: id2 } = await listing('0.005');
+  const { id: id2 } = await listing('0.01'); // outlay 0.01055 > 0.00945 left
   const r2 = await a.call('lintel_buy', { listingId: id2 });
   assert.match(r2.error, /over_per_day/);
 });

@@ -146,6 +146,7 @@ With the store wallet, the purchase needs one note of at least the escrow (price
 | `create()` | New Ironwood wallet; returns its `utest1…` address |
 | `import(text)` | `lintel-chain wallet` JSON or a 32-byte hex key |
 | `scan(txid)` | Adds this wallet's notes from a mined transaction (e.g. a faucet payment) |
+| `sync({ from?, maxBlocks? })` | Trial-decrypts compact blocks from `from` (or where the last sync stopped) to the tip: adds notes paying this wallet and marks spent ones (nullifiers). Up to 2,000 blocks per call |
 | `info()` / `address()` / `balance()` / `spendable()` | Public view; no keys |
 | `exportKey()` | SECRET spending key, for callers with their own key storage |
 
@@ -176,6 +177,10 @@ State is one JSON document with the same shape as the app's `localStorage` entry
 | your own | Implement `{ load(), save(state) }` |
 
 `lintel.exportState()` returns the whole document (SECRET).
+
+## Live on testnet
+
+A complete on-chain sale driven only by the SDK (seller and buyer in separate stores, a local relay proxying the public testnet lightwalletd, buyer funding from its store wallet after `wallet.sync`): funding mined at block 4,531,679, settlement at 4,531,685, the buyer's plaintext matched, the seller was paid 0.001 TAZ. Record: [docs/testnet/evidence-sdk-sale.json](testnet/evidence-sdk-sale.json).
 
 ## Starter app
 

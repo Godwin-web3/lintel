@@ -61,3 +61,17 @@ test('pay-in request against the testnet (LINTEL_TEST_NETWORK=1)', { skip: !proc
     assert.equal(backup.kind, 'lintel-payin-backup');
   } finally { await relay.stop(); }
 });
+
+test('wallet.sync walks compact blocks to the tip (LINTEL_TEST_NETWORK=1)', { skip: !process.env.LINTEL_TEST_NETWORK, timeout: 300000 }, async () => {
+  const relay = await startRelay();
+  try {
+    const l = await createLintel({ relayUrl: relay.url, store: new MemoryStore() });
+    await l.wallet.create();
+    const tip = await l.relay.height();
+    const r = await l.wallet.sync({ from: tip - 120 });
+    assert.equal(r.found, 0, 'a fresh wallet has no notes');
+    assert.equal(r.scanned, r.tip);
+    const again = await l.wallet.sync();
+    assert.ok(again.scanned >= r.scanned, 'resumes where it stopped');
+  } finally { await relay.stop(); }
+});
