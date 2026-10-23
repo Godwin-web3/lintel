@@ -98,6 +98,17 @@ input.mono, textarea.mono { font-family: var(--font-mono); font-size: 14px; }
 .file input::file-selector-button { font: 500 13px var(--font-sans); background: var(--flint); color: var(--bone); border: 1px solid var(--slate); border-radius: var(--r-sm); padding: var(--s1) var(--s2); margin-right: var(--s3); cursor: pointer; }
 .meter { display: flex; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; font-size: 12px; }
 .meter .mono { font-size: 12px; }
+/* Proven claims (predicates): seller editor and the buyer's verified list */
+.claims-edit { display: flex; flex-direction: column; gap: var(--s3); border: var(--hair); border-radius: var(--r-md); padding: var(--s4); margin: 0; background: var(--basalt); }
+.claims-edit legend { padding: 0 var(--s2); color: var(--ash); }
+.claims-edit p { margin: 0; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.claims { list-style: none; margin: var(--s2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--s1); }
+.claims li { display: flex; gap: var(--s2); align-items: baseline; color: var(--bone); overflow-wrap: anywhere; }
+.claims li::before { content: "\2713"; color: var(--verdigris); flex: none; }
+.claims.pending li::before { content: "\2022"; color: var(--ash); }
+.claims li .mono { font-size: 13px; }
+.claims-proven { margin-top: var(--s2); }
 
 /* ---------- layout helpers ---------- */
 .row { display: flex; justify-content: space-between; align-items: center; gap: var(--s3); }
@@ -474,6 +485,7 @@ a.txid:hover { color: var(--bone); text-decoration-color: var(--bone); }
   .title-row .amt { margin-top: 0; }
   .grid { grid-template-columns: 1fr; }
   .facts { grid-template-columns: 1fr; }
+  .row2 { grid-template-columns: 1fr; }
   .facts dt { border-bottom: 0; padding-bottom: 0; }
   .facts dd { padding-top: var(--s1); }
   .notice { grid-template-columns: 1fr; }

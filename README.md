@@ -29,6 +29,7 @@ Every row below runs on Zcash testnet (NU7, Ironwood pool, v6 transactions). Tra
 | --- | --- | --- |
 | Seal and prove a file in the browser (Halo 2, IPA over Pasta, no trusted setup) | Works | [How it works](docs/how-it-works.md) |
 | Payloads up to 1,523,681 bytes, every byte proven | Works | [Big payloads](docs/big-payloads.md) |
+| Proven claims: length bounds, magic prefix, bytes at an offset, proven in the same proof as the decryption and shown to the buyer | Works in the browser (seal, relay check, buyer verifies); no claims-carrying sale mined yet | [Proven claims](docs/predicates.md) |
 | Public proof check with no wallet at `/verify` | Works | [Verify](https://lintel-godwin-web3s-projects.vercel.app/verify) |
 | Browser sale: joint escrow, adaptor-signed settlement, key read from the mined transaction | Works, mined | funding [`75053762c1…`](https://lintel-relay.onrender.com/chain/tx/75053762c15aea7b27fad758928fc3009ca86d5ee3a10e35b17162914c302534) (4,522,583), settlement [`c51697ebe0…`](https://lintel-relay.onrender.com/chain/tx/c51697ebe0767395dee5fc54f246eccf53dc2e071f5690808ec77776939b2b67) (4,522,588) |
 | Refund after the lock (browser) | Works, mined | refund [`992163c4a2…`](https://lintel-relay.onrender.com/chain/tx/992163c4a20b3cc2e363b3720aeac8f25162c81bc795736d285b0b1bd3e43392) (4,522,635, `nLockTime` 4,522,631) |
@@ -62,6 +63,7 @@ A browser sale with both sides in the web app took 6 minutes 34 seconds end to e
 | Refund backup | Not done: the signed refund lives only in the buyer's browser storage |
 | Hosted seller agent | Not offered: the agent holds the listing's secrets, so it runs on the seller's machine |
 | Full wallet | Not done: the device wallet only knows notes scanned in by txid |
+| More claim types | Signed attestations and dataset predicates are designs only ([proven claims](docs/predicates.md)); claims need offer v3 and byte claims must sit in the first 23,777 bytes |
 | Fast big-file sealing in a browser tab | About 100 s per 23.8 KB part single-threaded (1 MB: over an hour); 1 MB took 9.5 minutes natively on 2 vCPU |
 
 Full status: [What ships when](docs/what-ships-when.md).

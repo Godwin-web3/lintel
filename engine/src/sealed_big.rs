@@ -75,6 +75,7 @@ use halo2_proofs::{
 use pasta_curves::pallas;
 use sha2::{Digest, Sha256};
 
+use crate::predicate::{self, Claim, Cols, Format, HashOnly, Predicate};
 use crate::sealed::{self, base_from_scalar, generator, point_coords, scalar_from_base, Bases, SpendAuthBase, BYTES_PER_CHUNK};
 
 type F = pallas::Base;
@@ -180,38 +181,50 @@ pub fn content_hash_bytes<const N: usize>(bytes: &[u8]) -> Option<[u8; 32]> {
 // ---------- circuit ----------
 
 #[derive(Clone, Debug)]
-pub struct Config {
+pub struct Config<PC = ()> {
     advice: [Column<Advice>; 10],
     instance: Column<Instance>,
     table: TableColumn,
     ecc: EccConfig<Bases>,
     poseidon: Pow5Config<F, 3, 2>,
     q_add: Selector,
+    range_check: PallasLookupRangeCheckConfig,
+    pred: PC,
 }
 
+/// One v3 part. `P` adds a [`Predicate`] over the same plaintext cells; with
+/// the default [`HashOnly`] this is exactly the circuit every v3 offer before
+/// predicates was proven with.
 #[derive(Clone, Debug)]
-pub struct PartCircuit<const N: usize> {
+pub struct PartCircuit<const N: usize, P: Predicate = HashOnly> {
     pub secret: Value<F>,
     pub plaintext: [Value<F>; N],
+    pub predicate: P,
 }
 
-impl<const N: usize> Default for PartCircuit<N> {
-    fn default() -> Self { Self { secret: Value::unknown(), plaintext: [Value::unknown(); N] } }
+impl<const N: usize, P: Predicate> Default for PartCircuit<N, P> {
+    fn default() -> Self { Self { secret: Value::unknown(), plaintext: [Value::unknown(); N], predicate: P::default() } }
 }
 
-impl<const N: usize> PartCircuit<N> {
-    pub fn new(secret: F, plaintext: &[F; N]) -> Self {
-        Self { secret: Value::known(secret), plaintext: plaintext.map(Value::known) }
+impl<const N: usize> PartCircuit<N, HashOnly> {
+    pub fn new(secret: F, plaintext: &[F; N]) -> Self { Self::with_predicate(secret, plaintext, HashOnly) }
+}
+
+impl<const N: usize, P: Predicate> PartCircuit<N, P> {
+    pub fn with_predicate(secret: F, plaintext: &[F; N], predicate: P) -> Self {
+        Self { secret: Value::known(secret), plaintext: plaintext.map(Value::known), predicate }
     }
 }
 
-impl<const N: usize> Circuit<F> for PartCircuit<N> {
-    type Config = Config;
+impl<const N: usize, P: Predicate> Circuit<F> for PartCircuit<N, P> {
+    type Config = Config<P::Config>;
     type FloorPlanner = SimpleFloorPlanner;
 
-    fn without_witnesses(&self) -> Self { Self::default() }
+    fn without_witnesses(&self) -> Self {
+        Self { secret: Value::unknown(), plaintext: [Value::unknown(); N], predicate: self.predicate.without_witnesses() }
+    }
 
-    fn configure(meta: &mut ConstraintSystem<F>) -> Config {
+    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         assert!(N % 2 == 0, "v3 parts hold an even number of chunks");
         let advice: [Column<Advice>; 10] = std::array::from_fn(|_| meta.advice_column());
         let instance = meta.instance_column();
@@ -239,10 +252,12 @@ impl<const N: usize> Circuit<F> for PartCircuit<N> {
             let c = meta.query_advice(advice[2], Rotation::cur());
             Constraints::with_selector(q, [("sum", c - a - b)])
         });
-        Config { advice, instance, table, ecc, poseidon, q_add }
+        // The predicate's gates come last, so HashOnly leaves the system unchanged.
+        let pred = P::configure(meta, &Cols { advice, instance, range_check });
+        Config { advice, instance, table, ecc, poseidon, q_add, range_check, pred }
     }
 
-    fn synthesize(&self, config: Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
+    fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
         let adv = config.advice;
         layouter.assign_table(|| "table_idx", |mut t| {
             for i in 0..(1usize << 10) {
@@ -304,6 +319,9 @@ impl<const N: usize> Circuit<F> for PartCircuit<N> {
                 layouter.constrain_instance(c.cell(), config.instance, 4 + 2 * i + w)?;
             }
         }
+        // Predicate over the same plaintext cells; its public inputs follow the ciphertext.
+        let cols = Cols { advice: adv, instance: config.instance, range_check: config.range_check };
+        self.predicate.synthesize(&config.pred, &cols, &mut layouter, &m, 4 + N)?;
         Ok(())
     }
 }
@@ -327,13 +345,24 @@ pub mod prove {
     };
     use pasta_curves::vesta;
 
-    pub struct Keys<const N: usize> {
+    /// Keys for parts of `N` chunks proven with predicate `P` (default: hash only).
+    pub struct Keys<const N: usize, P: Predicate = HashOnly> {
         pub params: Params<vesta::Affine>,
         pub vk: VerifyingKey<vesta::Affine>,
         pub pk: ProvingKey<vesta::Affine>,
+        _p: std::marker::PhantomData<P>,
     }
 
     pub fn setup<const N: usize>() -> Result<Keys<N>, Error> { keys(Params::new(k_for(N))) }
+
+    /// Keys for any predicate, generating fresh parameters.
+    pub fn setup_with<const N: usize, P: Predicate>() -> Result<Keys<N, P>, Error> { keys(Params::new(k_for(N))) }
+
+    /// Keys for predicate `Q` over the same (already checked) parameters as `k`.
+    /// Every predicate shares `params-big.bin`; only the circuit differs.
+    pub fn derive<const N: usize, P: Predicate, Q: Predicate>(k: &Keys<N, P>) -> Result<Keys<N, Q>, Error> {
+        keys(k.params.clone())
+    }
 
     /// Serialized commitment parameters for `N` (transparent: no trusted setup).
     pub fn params_bytes<const N: usize>() -> Vec<u8> {
@@ -344,6 +373,11 @@ pub mod prove {
 
     /// Builds keys from downloaded parameters, which must match the pinned digest.
     pub fn setup_from_params<const N: usize>(bytes: &[u8], pinned: &[u8; 32]) -> Result<Keys<N>, &'static str> {
+        setup_from_params_with::<N, HashOnly>(bytes, pinned)
+    }
+
+    /// [`setup_from_params`] for any predicate.
+    pub fn setup_from_params_with<const N: usize, P: Predicate>(bytes: &[u8], pinned: &[u8; 32]) -> Result<Keys<N, P>, &'static str> {
         if &sealed::prove::params_digest(bytes) != pinned {
             return Err("parameter file does not match pinned digest");
         }
@@ -352,20 +386,20 @@ pub mod prove {
         keys(params).map_err(|_| "key generation failed")
     }
 
-    fn keys<const N: usize>(params: Params<vesta::Affine>) -> Result<Keys<N>, Error> {
-        let empty = PartCircuit::<N>::default();
+    fn keys<const N: usize, P: Predicate>(params: Params<vesta::Affine>) -> Result<Keys<N, P>, Error> {
+        let empty = PartCircuit::<N, P>::default();
         let vk = keygen_vk(&params, &empty)?;
         let pk = keygen_pk(&params, vk.clone(), &empty)?;
-        Ok(Keys { params, vk, pk })
+        Ok(Keys { params, vk, pk, _p: std::marker::PhantomData })
     }
 
-    pub fn prove<const N: usize>(k: &Keys<N>, c: PartCircuit<N>, public: &[F]) -> Result<Vec<u8>, Error> {
+    pub fn prove<const N: usize, P: Predicate>(k: &Keys<N, P>, c: PartCircuit<N, P>, public: &[F]) -> Result<Vec<u8>, Error> {
         let mut tr = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         create_proof(&k.params, &k.pk, &[c], &[&[public]], rand::rng(), &mut tr)?;
         Ok(tr.finalize())
     }
 
-    pub fn verify<const N: usize>(k: &Keys<N>, proof: &[u8], public: &[F]) -> bool {
+    pub fn verify<const N: usize, P: Predicate>(k: &Keys<N, P>, proof: &[u8], public: &[F]) -> bool {
         let mut tr = Blake2bRead::<_, _, Challenge255<_>>::init(proof);
         verify_proof(&k.params, &k.vk, SingleVerifier::new(&k.params), &[&[public]], &mut tr).is_ok()
     }
@@ -376,32 +410,72 @@ pub mod prove {
 #[derive(Clone, Debug)]
 pub struct Part { pub hash: F, pub offset: u64, pub ciphertext: Vec<F>, pub proof: Vec<u8> }
 
+/// A v3 offer. `predicates` are the public claims proven in part 0 (empty:
+/// every part is hash only, as before predicates existed).
 #[derive(Clone, Debug)]
-pub struct BigOffer { pub t_point: pallas::Point, pub parts: Vec<Part> }
+pub struct BigOffer { pub t_point: pallas::Point, pub parts: Vec<Part>, pub predicates: Vec<Claim> }
+
+/// Keys for parts that carry claims ([`predicate::Format`]).
+pub type FormatKeys<const N: usize> = prove::Keys<N, Format>;
+
+/// Public instance of part `j`: the base instance, plus the `Format`
+/// parameters for part 0 of an offer with claims.
+fn part_public(t: &pallas::Point, p: &Part, fmt: Option<&predicate::FormatParams>) -> Option<Vec<F>> {
+    let mut v = public_inputs(t, p.hash, p.offset, &p.ciphertext)?;
+    if let Some(f) = fmt { v.extend(f.to_public()); }
+    Some(v)
+}
 
 /// Prepared plaintext for sealing part by part (the browser proves one part
 /// per call so it can report progress).
-pub struct Sealer<const N: usize> { s: F, t_point: pallas::Point, m: Vec<F> }
+pub struct Sealer<const N: usize> { s: F, t_point: pallas::Point, m: Vec<F>, claims: Vec<Claim>, fmt: Option<predicate::FormatParams> }
 
 impl<const N: usize> Sealer<N> {
-    pub fn new(s: F, payload: &[u8]) -> Result<Self, &'static str> {
+    pub fn new(s: F, payload: &[u8]) -> Result<Self, &'static str> { Self::with_claims(s, payload, vec![]) }
+
+    /// Sealer whose part 0 also proves `claims`. Each claim is checked
+    /// against the payload first, so a false claim fails here, not in the prover.
+    pub fn with_claims(s: F, payload: &[u8], claims: Vec<Claim>) -> Result<Self, &'static str> {
         let parts = parts_for(payload.len(), N).ok_or("payload too large")?;
         let m = sealed::pack(payload, N * parts).ok_or("payload too large")?;
         if bool::from(s.is_zero()) { return Err("secret is zero"); }
-        Ok(Self { s, t_point: pallas::Point::from(generator()) * scalar_from_base(s), m })
+        let fmt = if claims.is_empty() { None } else { Some(predicate::format_params(&claims, N)?) };
+        if claims.iter().any(|c| !c.holds(payload)) { return Err("a claim does not hold for this payload"); }
+        Ok(Self { s, t_point: pallas::Point::from(generator()) * scalar_from_base(s), m, claims, fmt })
     }
     pub fn parts(&self) -> usize { self.m.len() / N }
     pub fn t_point(&self) -> pallas::Point { self.t_point }
-    /// Proves part `j`.
-    pub fn prove_part(&self, keys: &prove::Keys<N>, j: usize) -> Result<Part, &'static str> {
+    pub fn claims(&self) -> &[Claim] { &self.claims }
+    /// Whether part `j` needs the claim keys ([`FormatKeys`]).
+    pub fn needs_format(&self, j: usize) -> bool { j == 0 && self.fmt.is_some() }
+
+    fn prove_block<P: Predicate>(&self, keys: &prove::Keys<N, P>, j: usize, pred: P) -> Result<Part, &'static str> {
         let block: [F; N] = self.m.get(j * N..(j + 1) * N).ok_or("no such part")?.try_into().unwrap();
         let offset = (j * N / 2) as u64;
         let hash = part_hash(&block);
         let ciphertext = encrypt_block(self.s, &block, offset);
-        let public = public_inputs(&self.t_point, hash, offset, &ciphertext).ok_or("secret is zero")?;
-        let proof = prove::prove(keys, PartCircuit::new(self.s, &block), &public).map_err(|_| "proving failed")?;
+        let mut public = public_inputs(&self.t_point, hash, offset, &ciphertext).ok_or("secret is zero")?;
+        public.extend(pred.public_inputs());
+        let proof = prove::prove(keys, PartCircuit::with_predicate(self.s, &block, pred), &public).map_err(|_| "proving failed")?;
         Ok(Part { hash, offset, ciphertext, proof })
     }
+
+    /// Proves part `j` (hash only). Part 0 of a sealer with claims needs
+    /// [`Self::prove_part_with`].
+    pub fn prove_part(&self, keys: &prove::Keys<N>, j: usize) -> Result<Part, &'static str> { self.prove_part_with(keys, None, j) }
+
+    /// Proves part `j`; part 0 of a sealer with claims uses `fmt`.
+    pub fn prove_part_with(&self, keys: &prove::Keys<N>, fmt: Option<&FormatKeys<N>>, j: usize) -> Result<Part, &'static str> {
+        if self.needs_format(j) {
+            let k = fmt.ok_or("part 0 carries claims: claim keys are needed")?;
+            self.prove_block(k, j, Format { params: self.fmt.clone() })
+        } else {
+            self.prove_block(keys, j, HashOnly)
+        }
+    }
+
+    /// The offer, once every part is proven (in order).
+    pub fn offer(&self, parts: Vec<Part>) -> BigOffer { BigOffer { t_point: self.t_point, parts, predicates: self.claims.clone() } }
 }
 
 /// Seals `payload` under `s`, one part after another.
@@ -413,7 +487,14 @@ pub fn seal<const N: usize>(keys: &prove::Keys<N>, s: F, payload: &[u8]) -> Resu
 /// Halo 2's own multicore pool). Peak memory grows with `threads`. On wasm32
 /// this is always sequential (the browser parallelises inside each proof).
 pub fn seal_parallel<const N: usize>(keys: &prove::Keys<N>, s: F, payload: &[u8], threads: usize) -> Result<BigOffer, &'static str> {
-    let sealer = Sealer::<N>::new(s, payload)?;
+    seal_with(keys, None, s, payload, vec![], threads)
+}
+
+/// Seals with claims proven in part 0 (`fmt` is required when `claims` is
+/// not empty).
+pub fn seal_with<const N: usize>(keys: &prove::Keys<N>, fmt: Option<&FormatKeys<N>>, s: F, payload: &[u8], claims: Vec<Claim>, threads: usize) -> Result<BigOffer, &'static str> {
+    let sealer = Sealer::<N>::with_claims(s, payload, claims)?;
+    if sealer.needs_format(0) && fmt.is_none() { return Err("claims need claim keys"); }
     let n = sealer.parts();
     let threads = threads.clamp(1, n);
     #[cfg(target_arch = "wasm32")]
@@ -428,16 +509,16 @@ pub fn seal_parallel<const N: usize>(keys: &prove::Keys<N>, s: F, payload: &[u8]
                 sc.spawn(|| loop {
                     let j = next.fetch_add(1, Ordering::Relaxed);
                     if j >= n { break; }
-                    let r = sealer.prove_part(keys, j);
+                    let r = sealer.prove_part_with(keys, fmt, j);
                     out.lock().unwrap()[j] = Some(r);
                 });
             }
         });
         let parts = out.into_inner().unwrap().into_iter().map(|p| p.unwrap_or(Err("proving failed"))).collect::<Result<Vec<_>, _>>()?;
-        return Ok(BigOffer { t_point: sealer.t_point, parts });
+        return Ok(sealer.offer(parts));
     }
-    let parts = (0..n).map(|j| sealer.prove_part(keys, j)).collect::<Result<Vec<_>, _>>()?;
-    Ok(BigOffer { t_point: sealer.t_point, parts })
+    let parts = (0..n).map(|j| sealer.prove_part_with(keys, fmt, j)).collect::<Result<Vec<_>, _>>()?;
+    Ok(sealer.offer(parts))
 }
 
 impl BigOffer {
@@ -445,32 +526,56 @@ impl BigOffer {
     pub fn content_hash(&self) -> [u8; 32] {
         aggregate_hash(self.n(), &self.parts.iter().map(|p| p.hash).collect::<Vec<_>>())
     }
+    /// The proven claims in plain English (meaningful only after the offer verified).
+    pub fn describe_claims(&self) -> Vec<String> { self.predicates.iter().map(Claim::describe).collect() }
 }
 
-/// Structural checks shared by [`verify_offer`] and [`verify_offer_parallel`].
-fn shape_ok<const N: usize>(o: &BigOffer, expected_t: &pallas::Point, expected_hash: &[u8; 32]) -> bool {
-    o.t_point.to_bytes() == expected_t.to_bytes()
+/// Structural checks shared by the verifiers. Returns the `Format`
+/// parameters part 0 is checked against (`Some(None)`: no claims).
+fn shape_ok<const N: usize>(o: &BigOffer, expected_t: &pallas::Point, expected_hash: &[u8; 32], has_fmt: bool) -> Option<Option<predicate::FormatParams>> {
+    let ok = o.t_point.to_bytes() == expected_t.to_bytes()
         && !o.parts.is_empty() && o.parts.len() <= MAX_PARTS
         && &o.content_hash() == expected_hash
-        && o.parts.iter().enumerate().all(|(j, p)| p.offset == (j * N / 2) as u64 && p.ciphertext.len() == N)
+        && o.parts.iter().enumerate().all(|(j, p)| p.offset == (j * N / 2) as u64 && p.ciphertext.len() == N);
+    if !ok { return None; }
+    if o.predicates.is_empty() { return Some(None); }
+    // Claims need the claim keys, and must map to parameters the circuit can prove.
+    let f = predicate::format_params(&o.predicates, N).ok()?;
+    // A length bound past this offer's capacity could never decrypt; refuse it.
+    let explicit_max = o.predicates.iter().find_map(|c| match c { Claim::Length { max, .. } => Some(*max), _ => None });
+    if !has_fmt || explicit_max.is_some_and(|m| m > capacity(N, o.parts.len()) as u64) { return None; }
+    Some(Some(f))
 }
 
-fn part_ok<const N: usize>(keys: &prove::Keys<N>, t: &pallas::Point, p: &Part) -> bool {
-    match public_inputs(t, p.hash, p.offset, &p.ciphertext) {
-        Some(public) => prove::verify(keys, &p.proof, &public),
-        None => false,
+fn part_ok<const N: usize>(keys: &prove::Keys<N>, fmt: Option<&FormatKeys<N>>, f: Option<&predicate::FormatParams>, t: &pallas::Point, j: usize, p: &Part) -> bool {
+    match (j, f, fmt) {
+        (0, Some(f), Some(k)) => part_public(t, p, Some(f)).is_some_and(|public| prove::verify(k, &p.proof, &public)),
+        (0, Some(_), None) => false,
+        _ => part_public(t, p, None).is_some_and(|public| prove::verify(keys, &p.proof, &public)),
     }
 }
 
 /// Payer check before paying: locked to `expected_t`, parts in order with
 /// non-overlapping keystream, every proof valid, aggregate hash matches.
+/// An offer with claims needs [`verify_offer_with`].
 pub fn verify_offer<const N: usize>(keys: &prove::Keys<N>, o: &BigOffer, expected_t: &pallas::Point, expected_hash: &[u8; 32]) -> bool {
-    shape_ok::<N>(o, expected_t, expected_hash) && o.parts.iter().all(|p| part_ok(keys, &o.t_point, p))
+    verify_offer_with(keys, None, o, expected_t, expected_hash)
+}
+
+/// [`verify_offer`] that also checks part 0 against the offer's claims.
+pub fn verify_offer_with<const N: usize>(keys: &prove::Keys<N>, fmt: Option<&FormatKeys<N>>, o: &BigOffer, expected_t: &pallas::Point, expected_hash: &[u8; 32]) -> bool {
+    verify_offer_parallel_with(keys, fmt, o, expected_t, expected_hash, 1)
 }
 
 /// [`verify_offer`] with parts checked on up to `threads` threads (native only).
 pub fn verify_offer_parallel<const N: usize>(keys: &prove::Keys<N>, o: &BigOffer, expected_t: &pallas::Point, expected_hash: &[u8; 32], threads: usize) -> bool {
-    if !shape_ok::<N>(o, expected_t, expected_hash) { return false; }
+    verify_offer_parallel_with(keys, None, o, expected_t, expected_hash, threads)
+}
+
+/// [`verify_offer_with`] on up to `threads` threads (native only).
+pub fn verify_offer_parallel_with<const N: usize>(keys: &prove::Keys<N>, fmt: Option<&FormatKeys<N>>, o: &BigOffer, expected_t: &pallas::Point, expected_hash: &[u8; 32], threads: usize) -> bool {
+    let Some(f) = shape_ok::<N>(o, expected_t, expected_hash, fmt.is_some()) else { return false };
+    let f = f.as_ref();
     #[cfg(not(target_arch = "wasm32"))]
     if threads > 1 {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -480,14 +585,14 @@ pub fn verify_offer_parallel<const N: usize>(keys: &prove::Keys<N>, o: &BigOffer
                 sc.spawn(|| loop {
                     let j = next.fetch_add(1, Ordering::Relaxed);
                     if j >= o.parts.len() || !ok.load(Ordering::Relaxed) { break; }
-                    if !part_ok(keys, &o.t_point, &o.parts[j]) { ok.store(false, Ordering::Relaxed); }
+                    if !part_ok(keys, fmt, f, &o.t_point, j, &o.parts[j]) { ok.store(false, Ordering::Relaxed); }
                 });
             }
         });
         return ok.load(Ordering::Relaxed);
     }
     let _ = threads;
-    o.parts.iter().all(|p| part_ok(keys, &o.t_point, p))
+    o.parts.iter().enumerate().all(|(j, p)| part_ok(keys, fmt, f, &o.t_point, j, p))
 }
 
 /// After payment: decrypt with the extracted adaptor secret.
@@ -549,7 +654,16 @@ pub struct PartRef {
 
 /// Offer v3 wire form: a small manifest; ciphertext and proofs are in blobs.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct BigOfferWire { pub v: u8, pub n: usize, pub t_point: String, pub content_hash: String, pub parts: Vec<PartRef> }
+pub struct BigOfferWire {
+    pub v: u8,
+    pub n: usize,
+    pub t_point: String,
+    pub content_hash: String,
+    pub parts: Vec<PartRef>,
+    /// Claims proven in part 0 (absent: hash only, as every offer before predicates).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub predicates: Vec<Claim>,
+}
 
 impl BigOffer {
     /// Manifest (without blob data) and the blobs, in part order.
@@ -558,7 +672,7 @@ impl BigOffer {
         let parts = self.parts.iter().zip(&blobs).map(|(p, b)| PartRef {
             hash: sealed::field_hex(&p.hash), offset: p.offset, blob: blob_id(b), len: b.len(), data: None,
         }).collect();
-        (BigOfferWire { v: 3, n: self.n(), t_point: hex::encode(self.t_point.to_bytes()), content_hash: hex::encode(self.content_hash()), parts }, blobs)
+        (BigOfferWire { v: 3, n: self.n(), t_point: hex::encode(self.t_point.to_bytes()), content_hash: hex::encode(self.content_hash()), parts, predicates: self.predicates.clone() }, blobs)
     }
 
     /// Rebuilds an offer from a manifest and its blobs (untrusted). Rejects a
@@ -573,7 +687,8 @@ impl BigOffer {
             if p.ciphertext.len() != w.n || p.offset != r.offset || sealed::field_hex(&p.hash) != r.hash { return None; }
             parts.push(p);
         }
-        let o = Self { t_point: crate::protocol::parse_point(&w.t_point)?, parts };
+        if !w.predicates.is_empty() { predicate::format_params(&w.predicates, w.n).ok()?; }
+        let o = Self { t_point: crate::protocol::parse_point(&w.t_point)?, parts, predicates: w.predicates.clone() };
         if hex::encode(o.content_hash()) != w.content_hash { return None; }
         Some(o)
     }
@@ -695,5 +810,128 @@ mod tests {
         for g in [vec![], b"LNT3".to_vec(), vec![0u8; 100], [b"LNT3".as_slice(), &[255, 255, 255, 255], &[0u8; 60]].concat()] {
             assert!(Part::from_blob(&g).is_none());
         }
+    }
+
+    // ---------- predicates ----------
+
+    fn vk_digest<const N: usize, P: Predicate>(k: &prove::Keys<N, P>) -> String {
+        let s = format!("{:?}", k.vk.pinned());
+        hex::encode(blake2b_simd::Params::new().hash_length(32).hash(s.as_bytes()).as_bytes())
+    }
+
+    /// HashOnly leaves the circuit exactly as it was before predicates: the
+    /// verifying key digest equals the one computed on main before this change
+    /// (n = 768 checked with `examples/vk_digest.rs`: cca8d7d2…).
+    #[test]
+    fn hash_only_vk_is_unchanged() {
+        let k = prove::setup::<8>().unwrap();
+        assert_eq!(vk_digest(&k), "a78308381e24ee4477c8185f6062968c3ccbd4bcaca0b66f4a3768435d55928e");
+        let f = prove::derive::<8, HashOnly, Format>(&k).unwrap();
+        assert_ne!(vk_digest(&f), vk_digest(&k), "Format is its own circuit");
+    }
+
+    /// Real size (n = 768, k = 15): the Format predicate fits the same
+    /// parameters; honest claims pass, false claims and tampered public inputs fail.
+    #[test]
+    fn format_predicate_real_size_mock() {
+        const N: usize = CHUNKS;
+        let (_, s) = sealed::new_secret();
+        let mut data: Vec<u8> = (0..20_000u32).map(|i| (i * 7 + 3) as u8).collect();
+        data[..5].copy_from_slice(b"%PDF-");
+        data[5000..5020].copy_from_slice(&[0xabu8; 20]);
+        let m = sealed::pack(&data, N).unwrap();
+        let block: [F; N] = m[..].try_into().unwrap();
+        let t = pallas::Point::from(generator()) * scalar_from_base(s);
+        let ct = encrypt_block(s, &block, 0);
+        let base = public_inputs(&t, part_hash(&block), 0, &ct).unwrap();
+        let claims = vec![
+            Claim::Prefix { hex: hex::encode(b"%PDF-") },
+            Claim::Length { min: 19_000, max: 21_000 },
+            Claim::BytesAt { offset: 5000, hex: "ab".repeat(20) },
+        ];
+        let run = |claims: &[Claim], tweak: &dyn Fn(&mut Vec<F>)| {
+            let f = predicate::format_params(claims, N).unwrap();
+            let mut public = base.clone();
+            public.extend(f.to_public());
+            tweak(&mut public);
+            let c = PartCircuit::<N, Format>::with_predicate(s, &block, Format { params: Some(f) });
+            MockProver::run(k_for(N), &c, vec![public]).unwrap().verify().is_ok()
+        };
+        let none = |_: &mut Vec<F>| {};
+        assert!(run(&claims, &none), "honest claims");
+        // Wrong prefix, wrong length, wrong field: the circuit is unsatisfiable.
+        assert!(!run(&[Claim::Prefix { hex: hex::encode(b"%PDX") }], &none));
+        assert!(!run(&[Claim::Length { min: 20_001, max: 21_000 }], &none));
+        assert!(!run(&[Claim::Length { min: 0, max: 19_999 }], &none));
+        assert!(!run(&[Claim::BytesAt { offset: 5000, hex: "ab".repeat(19) + "ac" }], &none));
+        assert!(!run(&[Claim::BytesAt { offset: 4999, hex: "ab".repeat(20) }], &none));
+        // A byte claim pointing past the real end (into zero padding) fails.
+        assert!(!run(&[Claim::BytesAt { offset: 20_000, hex: "00".into() }], &none));
+        // Tampered public inputs: the prover's witness no longer fits.
+        let p0 = 4 + N;
+        assert!(!run(&claims, &|v| v[p0] = F::from(20_001))); // min raised above the real length
+        assert!(!run(&claims, &|v| v[p0 + 2] = F::from(20_001))); // end past the real length
+        assert!(!run(&claims, &|v| v[p0 + 3] += F::ONE)); // window 0 chunk index
+        assert!(!run(&claims, &|v| v[p0 + 3 + 1 + 62] += F::ONE)); // window 0, value of byte 0
+        assert!(!run(&claims, &|v| v[p0 + 3 + 125 + 1 + 5] = F::ONE)); // window 1: claim an extra byte (mask)
+    }
+
+    #[test]
+    fn claims_roundtrip_real_proofs_and_tamper() {
+        const N: usize = 8; // small circuit for speed; same code path (part 0 holds 217 bytes)
+        let keys = prove::setup::<N>().unwrap();
+        let fmt = prove::derive::<N, HashOnly, Format>(&keys).unwrap();
+        let mut payload: Vec<u8> = (0..capacity(N, 3) - 10).map(|i| (i * 13 + 1) as u8).collect();
+        payload[..4].copy_from_slice(b"\x7fELF");
+        payload[100..104].copy_from_slice(&[1, 2, 3, 4]);
+        let len = payload.len() as u64;
+        let claims = vec![
+            Claim::Prefix { hex: "7f454c46".into() },
+            Claim::BytesAt { offset: 100, hex: "01020304".into() },
+            Claim::Length { min: len - 5, max: len + 5 },
+        ];
+        let (t, s) = sealed::new_secret();
+        let tp = pallas::Point::from(generator()) * t;
+        let h = content_hash_bytes::<N>(&payload).unwrap();
+        // A false claim is refused before proving; claims without keys too.
+        assert!(seal_with(&keys, Some(&fmt), s, &payload, vec![Claim::Prefix { hex: "00".into() }], 1).is_err());
+        assert!(seal_with(&keys, None, s, &payload, claims.clone(), 1).is_err());
+        let o = seal_with(&keys, Some(&fmt), s, &payload, claims.clone(), 2).unwrap();
+        assert_eq!(o.parts.len(), 3);
+        assert!(verify_offer_with(&keys, Some(&fmt), &o, &tp, &h));
+        assert!(verify_offer_parallel_with(&keys, Some(&fmt), &o, &tp, &h, 2));
+        assert!(!verify_offer(&keys, &o, &tp, &h), "claims need the claim keys");
+        assert_eq!(open(t, &o).unwrap(), payload);
+        assert_eq!(o.describe_claims()[0], "Starts with bytes 0x7f454c46");
+
+        // Manifest round trip carries the claims.
+        let (man, blobs) = o.to_manifest();
+        let j = serde_json::to_string(&man).unwrap();
+        assert!(j.contains(r#""predicates":[{"id":"prefix","hex":"7f454c46"}"#));
+        let back = BigOffer::from_manifest(&serde_json::from_str(&j).unwrap(), &blobs).unwrap();
+        assert_eq!(back.predicates, claims);
+        assert!(verify_offer_with(&keys, Some(&fmt), &back, &tp, &h));
+
+        // Changed claim (same proofs): fails. Stripped claims: part 0's proof is
+        // not a hash-only proof, fails. Claims added to a hash-only offer: fail.
+        let mut bad = o.clone(); bad.predicates[0] = Claim::Prefix { hex: "7f454c47".into() };
+        assert!(!verify_offer_with(&keys, Some(&fmt), &bad, &tp, &h));
+        let mut bad = o.clone(); bad.predicates[2] = Claim::Length { min: len + 1, max: len + 5 };
+        assert!(!verify_offer_with(&keys, Some(&fmt), &bad, &tp, &h));
+        let mut bad = o.clone(); bad.predicates.truncate(2);
+        assert!(!verify_offer_with(&keys, Some(&fmt), &bad, &tp, &h));
+        let mut bad = o.clone(); bad.predicates.clear();
+        assert!(!verify_offer_with(&keys, Some(&fmt), &bad, &tp, &h));
+        let plain = seal::<N>(&keys, s, &payload).unwrap();
+        assert!(verify_offer(&keys, &plain, &tp, &h));
+        assert!(verify_offer_with(&keys, Some(&fmt), &plain, &tp, &h), "old offers verify with the new verifier");
+        let mut bad = plain.clone(); bad.predicates = claims.clone();
+        assert!(!verify_offer_with(&keys, Some(&fmt), &bad, &tp, &h));
+        // A length bound past the offer's capacity is refused.
+        let mut bad = o.clone(); bad.predicates[2] = Claim::Length { min: len - 5, max: capacity(N, 3) as u64 + 1 };
+        assert!(!verify_offer_with(&keys, Some(&fmt), &bad, &tp, &h));
+        // Manifest with an unknown claim id does not parse.
+        let wild = j.replace(r#""id":"prefix""#, r#""id":"regex""#);
+        assert!(serde_json::from_str::<BigOfferWire>(&wild).is_err());
     }
 }

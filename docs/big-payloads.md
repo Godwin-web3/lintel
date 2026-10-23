@@ -114,6 +114,10 @@ Storage backends follow `RELAY_STORAGE`: files under `BLOB_DIR` (default
 blob, `SET NX`). `BLOB_QUOTA` caps total bytes (default 2 GB) and `MAX_BLOB`
 the size of one blob.
 
+The manifest may also carry `predicates`, the claims proven in part 0 (for
+example `[{"id":"prefix","hex":"25504446"}]`). It is omitted when there are
+none, so manifests without claims are unchanged. See [Proven claims](predicates.md).
+
 ### 4. Parallel parts
 
 `sealed_big::seal_parallel` and `verify_offer_parallel` work on several parts

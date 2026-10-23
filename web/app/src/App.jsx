@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { crypto, relay, store, randomHex, randomAlpha, sleep, RELAY, putBlobs, resolveOffer } from './api.js';
+import { ClaimsEditor, ClaimList, EMPTY_CLAIMS } from './claims.jsx';
 import { sellV2, startSellerAgent, MAX_COPIES, V2_MAX } from './presale.js';
 import { ListingV2, SellerCardV2, Purchases, copiesLabel } from './Presale.jsx';
 import { WalletPanel, OnchainBuy } from './Onchain.jsx';
@@ -162,6 +163,8 @@ function Market() {
 function Sell({ boot }) {
   const [form, setForm] = useState({ title: '', description: '', price: '', text: '', copies: '1', onchain: false });
   const [file, setFile] = useState(null);
+  const [claims, setClaims] = useState(EMPTY_CLAIMS);
+  const [claimSt, setClaimSt] = useState({ state: 'none' });
   const [steps, setSteps] = useState(null);
   const [err, setErr] = useState('');
   // Every byte's decryption is proven at any size: up to 7,905 bytes in small
@@ -171,7 +174,9 @@ function Sell({ boot }) {
 
   const payloadBytes = async () => (file ? new Uint8Array(await file.arrayBuffer()) : new TextEncoder().encode(form.text));
   const size = file ? file.size : new TextEncoder().encode(form.text).length;
-  const bigParts = size > (form.onchain ? (boot.maxPayload || 1953) : V2_MAX) ? Math.ceil((Math.ceil(size / 31) + 1) / (partBytes / 31)) : 0;
+  // Proven claims live in part 0 of an offer v3, so any listing with claims is v3.
+  const withClaims = claimSt.state === 'ok' ? claimSt.json : undefined;
+  const bigParts = size > (form.onchain ? (boot.maxPayload || 1953) : V2_MAX) || withClaims ? Math.max(1, Math.ceil((Math.ceil(size / 31) + 1) / (partBytes / 31))) : 0;
   const partMsg = (p) => (p.uploaded !== undefined ? `uploading proven parts ${p.uploaded}/${p.blobs}` : p.part === 0 ? `building big-payload keys, then ${p.parts} proofs` : `part ${p.part}/${p.parts} proven (${(p.ms / 1000).toFixed(0)}s)`);
 
   async function submit(e) {
@@ -186,7 +191,7 @@ function Sell({ boot }) {
       const t0 = performance.now();
       // Presale (v2): every copy is pre-sealed now, so buyers never wait for this device.
       await sellV2({
-        payload, copies,
+        payload, copies, claims: withClaims,
         meta: { title: form.title.trim(), description: form.description.trim(), price_zec: form.price.trim(), filename: file?.name },
         onPart: (i, n, p) => { s[0][2] = `copy ${i}/${n}: ${partMsg(p)}`; setSteps(s.map((x) => [...x])); },
         onStep: (i, n, ms) => {
@@ -213,10 +218,10 @@ function Sell({ boot }) {
       if (payload.length > max) throw new Error(`listings hold up to ${fmtBytes(max)}`);
       const t0 = performance.now();
       let r;
-      if (payload.length <= (boot.maxPayload || 1953)) r = await crypto('seal', { payload });
+      if (payload.length <= (boot.maxPayload || 1953) && !withClaims) r = await crypto('seal', { payload });
       else {
         // Offer v3: proofs per 23 KB part; blobs go to the relay's content-addressed store, the listing keeps the manifest.
-        r = await crypto('sealBig', { payload }, (p) => { s[0][2] = partMsg(p); setSteps(s.map((x) => [...x])); });
+        r = await crypto('sealBig', { payload, claims: withClaims }, (p) => { s[0][2] = partMsg(p); setSteps(s.map((x) => [...x])); });
         await putBlobs(r.blobs, (done, total) => { s[0][2] = partMsg({ uploaded: done, blobs: total }); setSteps(s.map((x) => [...x])); });
       }
       s[0] = [s[0][0], 'done', `${((performance.now() - t0) / 1000).toFixed(1)}s on this device`]; s[1][1] = 'run'; setSteps(s.map((x) => [...x]));
@@ -259,11 +264,13 @@ function Sell({ boot }) {
           <span className="mono">{fmtBytes(size)} / {fmtBytes(max)}{bigParts ? ` · ${bigParts} proof${bigParts > 1 ? 's' : ''}${!form.onchain && Number(form.copies) > 1 ? ' per copy' : ''}` : ''}</span>
           <span>The filename is public if you attach a file.</span>
         </div>
-        <button className="btn" disabled={busy || boot.state !== 'ready' || size === 0 || size > max}>
+        <ClaimsEditor value={claims} onChange={setClaims} payload={payloadBytes} contentKey={file || form.text} size={size} ready={boot.state === 'ready'} onStatus={setClaimSt} />
+        <button className="btn" disabled={busy || boot.state !== 'ready' || size === 0 || size > max || claimSt.state === 'bad'}>
           {boot.state !== 'ready' ? 'Waiting for the prover…' : busy ? 'Sealing…' : 'Seal and list'}
         </button>
       </form>
       {steps && <Steps steps={steps} />}
+      {busy && steps[0][1] === 'run' && withClaims && <p className="muted small">Claims are proven in the first 23.8 KB part, so even a short file takes one big-part proof.</p>}
       {busy && steps[0][1] === 'run' && <p className="muted small">Every byte's decryption is proven: each copy needs its own proofs, one per 23.8 KB part for larger files (about 100 s per part in a single-threaded tab, less with the threaded engine). Keep this tab open until listing finishes.</p>}
       {err && <p className="error" role="alert">{err}</p>}
     </section>
@@ -410,10 +417,12 @@ function Listing({ id, boot }) {
     setVerify({ state: 'run' });
     const t0 = performance.now();
     resolveOffer(data.listing.offer)
-      .then((offer) => crypto('verifyOffer', { offer, contentHash: data.listing.content_hash }))
-      .then((t) => {
+      .then(async (offer) => {
+        const t = await crypto('verifyOffer', { offer, contentHash: data.listing.content_hash });
         if (t !== data.listing.t_point) throw new Error('offer is locked to a different key than the listing claims');
-        setVerify({ state: 'ok', t, ms: Math.round(performance.now() - t0) });
+        const ms = Math.round(performance.now() - t0);
+        // Claims are part of what was just verified (part 0's proof is checked against them).
+        setVerify({ state: 'ok', t, ms, claims: await crypto('offerClaims', { offer }) });
       })
       .catch((e) => setVerify({ state: 'bad', error: e.message }));
   }, [data, boot.state, verify.state]);
@@ -499,6 +508,7 @@ function Listing({ id, boot }) {
           {verify.state === 'idle' && 'Waiting for the prover…'}
           {verify.state === 'run' && 'Verifying the Halo 2 proof on this device…'}
           {verify.state === 'ok' && <><b>Proof verified</b> in <span className="mono">{verify.ms} ms</span>. The file matches the listing: under the secret behind T, the ciphertext decrypts to content with this exact hash.</>}
+          {verify.state === 'ok' && verify.claims?.length > 0 && <div className="claims-proven"><b>Also proven about that content:</b><ClaimList claims={verify.claims} /></div>}
           {verify.state === 'bad' && <><b>Proof rejected:</b> {verify.error}. Do not buy.</>}
         </div>
       </div>

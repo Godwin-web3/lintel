@@ -101,10 +101,11 @@ const ops = {
   // ---- seller ----
   // Single-copy listing (on-chain flow) above maxPayloadBytes(): offer v3.
   // Returns the manifest as `offer` plus the blobs the app must upload first.
-  async sealBig({ payload }, progress) {
+  // `claims` (optional): JSON array proven inside part 0 (predicates, offer v3 only).
+  async sealBig({ payload, claims }, progress) {
     await ensureBig();
     const m = new L.Merchant();
-    const sealer = m.bigSealer(payload);
+    const sealer = m.bigSealer(payload, claims || undefined);
     progress({ part: 0, parts: sealer.parts(), ms: 0 });
     const blobs = proveAll(sealer, progress);
     const out = { offer: sealer.manifest(), blobs, contentHash: L.contentHashBig(payload), tPoint: m.tPoint(), merchantVk: m.verificationKey(), state: m.exportState() };
@@ -143,7 +144,12 @@ const ops = {
     return m.complete(presig, partial);
   },
 
+  // Seller-side check of claims against the payload; returns [{ claim, text }].
+  async checkClaims({ claims, payload }) { await ready; return JSON.parse(L.checkClaims(claims, payload)); },
+
   // ---- buyer ----
+  // Claims an offer carries, in plain English. Show only after verifyOffer passed.
+  async offerClaims({ offer }) { await ready; return JSON.parse(L.offerClaims(offer)); },
   async verifyOffer({ offer, contentHash }) {
     await ready;
     ensureV1();
