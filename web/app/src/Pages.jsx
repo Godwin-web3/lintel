@@ -3,7 +3,7 @@
 import { Link, SiteHeader, SiteFooter, useTitle, GITHUB, PUBLIC_RELAY } from './site.jsx';
 import { RUNS, n } from './evidence.js';
 
-function Page({ active, label, title, lede, children }) {
+export function Page({ active, label, title, lede, children }) {
   return (
     <div className="site">
       <SiteHeader active={active} />
@@ -22,7 +22,7 @@ function Page({ active, label, title, lede, children }) {
   );
 }
 
-function Band({ id, label, title, intro, children }) {
+export function Band({ id, label, title, intro, children }) {
   return (
     <section className="band" id={id}>
       <div className="wrap">
@@ -39,7 +39,7 @@ function Band({ id, label, title, intro, children }) {
   );
 }
 
-function Next({ title, children }) {
+export function Next({ title, children }) {
   return (
     <section className="closing short">
       <div className="wrap">

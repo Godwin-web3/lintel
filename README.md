@@ -3,102 +3,133 @@
   <img src="brand/logo/lintel-lockup-light.svg#gh-light-mode-only" alt="Lintel" width="220">
 </p>
 
-<h3 align="center">Pay to unlock. Proven before you pay.</h3>
-
-<p align="center"><b>Pay only for what's proven.</b></p>
+<h3 align="center">Sell a sealed file. The buyer checks a proof before paying, and the payment hands over the key.</h3>
 
 <p align="center">
-  Private, conditional settlement on Zcash. The transaction that pays the seller is the transaction that hands the buyer the key.
-</p>
-
-<p align="center">
-  <a href="https://lintel-godwin-web3s-projects.vercel.app">App</a> ·
-  <a href="https://lintel-godwin-web3s-projects.vercel.app/how-it-works">How it works</a> ·
+  <a href="https://lintel-godwin-web3s-projects.vercel.app/app">App</a> ·
+  <a href="https://lintel-godwin-web3s-projects.vercel.app/verify">Verify</a> ·
   <a href="https://lintel-godwin-web3s-projects.vercel.app/docs">Docs</a> ·
-  <a href="docs/testnet-evidence.md">Testnet evidence</a> ·
-  <a href="SECURITY.md">Security</a>
+  <a href="https://lintel-godwin-web3s-projects.vercel.app/whitepaper">Whitepaper</a> ·
+  <a href="https://lintel-godwin-web3s-projects.vercel.app/evidence">Evidence</a>
 </p>
 
-> **Testnet only, unaudited.** Don't use Lintel with real funds.
+<p align="center"><b>Zcash testnet only · unaudited · no mainnet until testnet is solid and reviewed</b></p>
 
-## What it does
+[![Lintel: pay to unlock, proven before you pay](web/app/public/media/home.png)](https://lintel-godwin-web3s-projects.vercel.app)
 
-A seller seals a file (a bug report, a dataset, research) in their browser and publishes a zero-knowledge proof that the ciphertext opens to content with a stated hash. A buyer verifies that proof on their own device, then pays into a shielded Zcash escrow. To claim the payment, the seller must complete an adaptor signature that publishes the decryption key on-chain. If the seller never claims, a refund the seller co-signed in advance becomes valid after a lock height.
+Lintel is private conditional settlement on Zcash. A seller seals a file in their browser and publishes a Halo 2 proof that the ciphertext decrypts, under the secret behind a public point `T`, to content with hash `h`. The buyer verifies that proof on their own device (Rust compiled to WebAssembly), then funds a shielded escrow that neither side can spend alone, from the in-browser wallet or from any testnet wallet through a ZIP 321 request. To get paid, the seller (or `lintel-agent`, while the seller is offline) completes a two-party adaptor signature, and that signature reveals the key on chain. If the seller never settles, a refund co-signed before funding becomes valid after its `nLockTime`.
 
-- **Proven before you pay.** Halo 2 proof that the ciphertext decrypts, under the secret behind `T`, to content with hash `h`. No trusted setup.
-- **Atomic.** Two-party adaptor signatures over Orchard's spend-auth group: payment and key release are one transaction.
-- **Refundable.** v2 refunds are time-locked by consensus (`nLockTime`), so they can't race the seller's claim.
-- **Every byte proven.** Listings hold up to 1,523,681 bytes (about 1.5 MB); files over 1,953 bytes are proven in 23.8 KB parts, and the buyer verifies every part before paying ([big payloads](docs/big-payloads.md)).
-- **Pay from any wallet, sell with the tab closed.** Buyers fund the escrow from the in-browser wallet or from any Zcash testnet wallet through a ZIP 321 request (shielded or transparent). Sellers can hand an on-chain listing to the seller agent (`lintel-agent`), which finishes the sale with their browser closed.
-- **Private by construction.** Keys, signing shares, `t` and plaintext never reach the relay. Proving, signing and transaction building run in the browser (Rust → WebAssembly), or in the seller agent on a machine the seller controls. The relay only passes public messages.
-- **Live on testnet.** Browser sale mined at 4,522,583 (funding) and 4,522,588 (settlement); seller-agent sale at 4,529,902 and 4,529,908; sales paid from another wallet at 4,529,992–4,530,013. See [evidence](docs/testnet-evidence.md).
+No trusted setup, no custodian, no server-side keys. Files up to 1,523,681 bytes, every byte's decryption proven (offer v3: up to 64 parts at k = 15).
+
+## What works today
+
+Every row below runs on Zcash testnet (NU7, Ironwood pool, v6 transactions). Transaction links open on the public relay's lightwalletd proxy, which returns the raw transaction and its block. Records: [`docs/testnet/*.json`](docs/testnet).
+
+| Feature | Status | Testnet proof |
+| --- | --- | --- |
+| Seal and prove a file in the browser (Halo 2, IPA over Pasta, no trusted setup) | Works | [How it works](docs/how-it-works.md) |
+| Payloads up to 1,523,681 bytes, every byte proven | Works | [Big payloads](docs/big-payloads.md) |
+| Public proof check with no wallet at `/verify` | Works | [Verify](https://lintel-godwin-web3s-projects.vercel.app/verify) |
+| Browser sale: joint escrow, adaptor-signed settlement, key read from the mined transaction | Works, mined | funding [`75053762c1…`](https://lintel-relay.onrender.com/chain/tx/75053762c15aea7b27fad758928fc3009ca86d5ee3a10e35b17162914c302534) (4,522,583), settlement [`c51697ebe0…`](https://lintel-relay.onrender.com/chain/tx/c51697ebe0767395dee5fc54f246eccf53dc2e071f5690808ec77776939b2b67) (4,522,588) |
+| Refund after the lock (browser) | Works, mined | refund [`992163c4a2…`](https://lintel-relay.onrender.com/chain/tx/992163c4a20b3cc2e363b3720aeac8f25162c81bc795736d285b0b1bd3e43392) (4,522,635, `nLockTime` 4,522,631) |
+| Time lock enforced by consensus (early refund rejected, mined after the lock) | Works, mined | refund [`e78f088e5b…`](https://lintel-relay.onrender.com/chain/tx/e78f088e5bae544378439cf8e665fca72abe1f0f1157feaf0167acf1502963b8) (4,522,335) |
+| Seller agent `lintel-agent`, seller's browser closed | Works, mined | settlement [`5104f5af57…`](https://lintel-relay.onrender.com/chain/tx/5104f5af5766142cdeeba4d742b24c37149cbfdeaadbe51dd501d99e7c9aacc2) (4,529,908) |
+| Pay from another wallet, transparent receiver | Works, mined | payment [`d38a395f17…`](https://lintel-relay.onrender.com/chain/tx/d38a395f17644f8c27598ac5a0c5ae6c6d287dbb872ff52b793bce7b2c25e3ed) (4,529,992), settlement [`f765cb4e12…`](https://lintel-relay.onrender.com/chain/tx/f765cb4e12f3a2fa22d7afb0c6d1973a4372351460990222f72fae26405ec628) (4,530,002) |
+| Pay from another wallet, Orchard receiver (Ironwood note) | Works, mined | payment [`7375623f73…`](https://lintel-relay.onrender.com/chain/tx/7375623f73840a1e0c5c9becc4c818fb1f7233e72899839f377fdfbc33b91bd2) (4,530,006), settlement [`a7575c5e61…`](https://lintel-relay.onrender.com/chain/tx/a7575c5e61915887f8ccdd14a9cd68a7c05c155387aa8fce858ead3f5aadcf9a) (4,530,013) |
+| Multi-copy listings, buyers order while the seller is offline | Works, off-chain only (no coins move) | [How it works](docs/how-it-works.md#6-multi-copy-presale-listings) |
+
+A browser sale with both sides in the web app took 6 minutes 34 seconds end to end. All runs: [Testnet evidence](docs/testnet-evidence.md).
+
+<table>
+  <tr>
+    <td width="50%"><img src="web/app/public/media/app-listing.png" alt="A listing in the app after the buyer's browser verified its proof"></td>
+    <td width="50%"><img src="web/app/public/media/verify.png" alt="The public Verify page showing a verified listing"></td>
+  </tr>
+  <tr>
+    <td>A listing after the buyer's browser verified its Halo 2 proof.</td>
+    <td>Anyone can check a listing at <code>/verify</code>, no wallet needed.</td>
+  </tr>
+</table>
+
+## Not yet
+
+| Item | State |
+| --- | --- |
+| Mainnet | Not planned until testnet is solid and reviewed; see the [Production gate](docs/production.md) |
+| External audit | Not done |
+| On-chain settlement for multi-copy listings | Not done: they settle through the relay and move no coins |
+| Confidentiality after a sale | Not provided: after a single-copy sale settles, anyone who reads the sale's public session record and the mined settlement can compute the key ([threat model](docs/threat-model.md#after-the-sale)) |
+| Refund backup | Not done: the signed refund lives only in the buyer's browser storage |
+| Hosted seller agent | Not offered: the agent holds the listing's secrets, so it runs on the seller's machine |
+| Full wallet | Not done: the device wallet only knows notes scanned in by txid |
+| Fast big-file sealing in a browser tab | About 100 s per 23.8 KB part single-threaded (1 MB: over an hour); 1 MB took 9.5 minutes natively on 2 vCPU |
+
+Full status: [What ships when](docs/what-ships-when.md).
 
 ## How it works
 
 ```mermaid
 sequenceDiagram
-  participant S as Seller (browser)
+  participant S as Seller (browser or lintel-agent)
   participant R as Relay (public data)
   participant B as Buyer (browser)
   participant Z as Zcash testnet
-  S->>R: ciphertext, T, h, Halo 2 proof
+  S->>R: ciphertext, T, h, Halo 2 proofs
   B->>R: fetch listing
-  B->>B: verify proof locally
+  B->>B: verify proofs locally
   S-->>B: co-signed time-locked refund (via relay)
-  B->>Z: fund joint escrow
+  B->>Z: fund joint escrow (device wallet or ZIP 321 pay-in)
   B-->>S: adaptor pre-signature locked to T
   S->>Z: settlement with completed signature
   B->>Z: read signature, t = s − s_a − s_b, decrypt
 ```
 
-Read more: [How it works](docs/how-it-works.md) · [Architecture](docs/architecture.md) · [Security model](docs/security-model.md).
+Read more: [Whitepaper](docs/whitepaper.md) · [Protocol](docs/how-it-works.md) · [Threat model](docs/threat-model.md) · [How Lintel compares](docs/compare.md).
 
-## Quickstart
+## Try it
 
-Use the hosted app: <https://lintel-godwin-web3s-projects.vercel.app>. Get testnet TAZ from a faucet and follow the [Quickstart](docs/quickstart.md).
+- **Two minutes, no wallet:** seal a line of text in the [app](https://lintel-godwin-web3s-projects.vercel.app/app), then check its proof at [/verify](https://lintel-godwin-web3s-projects.vercel.app/verify). [Quickstart](docs/quickstart.md#in-two-minutes)
+- **Full sale:** two browser profiles and some faucet TAZ. [Quickstart](docs/quickstart.md#full-sale-on-testnet)
+- **Test it and report what breaks:** [tester guide](https://lintel-godwin-web3s-projects.vercel.app/testers) · [open an issue](https://github.com/Godwin-web3/lintel/issues/new?template=bug_report.md)
 
-Run it locally:
+## Architecture
+
+```
+lintel/
+  engine/            Rust crate `lintel`: adaptor signatures, Halo 2 circuits (sealed, sealed_multi,
+                     sealed_big, disclosure), presale, chain (escrow, PCZT checks, refunds, ZIP 321),
+                     seller agent; binaries lintel-cli, lintel-chain, lintel-agent
+  wasm/              The engine for the browser (crate `lintel-wasm`), optional threaded build
+  web/relay/         Public-data relay and lightwalletd proxy (Node); never sees keys, t or plaintext
+  web/app/           Site, marketplace (/app), public verifier (/verify) and docs (React + Vite)
+  docs/              Documentation, whitepaper, blog, testnet records (docs/testnet/*.json)
+  brand/             Brand kit: logos, tokens.css, fonts
+```
+
+Details: [Architecture](docs/architecture.md).
+
+## Local development
 
 ```sh
-# engine tests and demos
+# engine tests and a demo
 cd engine && cargo test --release
 cargo run --release --bin lintel-cli -- sealed-demo
 
-# relay (Node 20+; tests: npm test)
-cd web/relay && node server.js            # http://localhost:8787
+# relay (Node 20+)
+cd web/relay && npm test && node server.js        # http://localhost:8787
 
-# app
-cd web/app && npm ci && VITE_RELAY_URL=http://localhost:8787 npm run dev
+# app (Rust, wasm-pack and clang for the on-chain engine)
+cd web/app && npm ci && npm run wasm && npm run wasm:chain
+VITE_RELAY_URL=http://localhost:8787 npm run dev
+npm run check:links && npm run build
 ```
 
-Self-host the relay (Render + Upstash) and app (Vercel): [docs/self-hosting.md](docs/self-hosting.md). CLI reference: [docs/cli.md](docs/cli.md).
+Self-host the relay (Render + Upstash) and the app (Vercel): [Self-hosting](docs/self-hosting.md). CLI and seller agent: [CLI reference](docs/cli.md).
 
-## Repository
+## Security and contact
 
-| Path | What |
-| --- | --- |
-| [`engine/`](engine) | Rust crate: adaptor signatures, Halo 2 circuits, sealed goods, presale, chain, seller agent, CLIs |
-| [`wasm/`](wasm) | The engine for the browser |
-| [`web/relay/`](web/relay) | Public-data relay and chain proxy (Node) |
-| [`web/app/`](web/app) | Site pages, marketplace and docs (React + Vite) |
-| [`docs/`](docs) | Documentation |
-| [`brand/`](brand) | Brand kit |
-
-## Status and limits
-
-Working on testnet today: single-copy listings with on-chain escrow, settlement and time-locked refund; funding from the in-browser wallet or from any testnet wallet via ZIP 321 (transparent or shielded); the seller agent (`lintel-agent`) for sales with the seller's browser closed; multi-copy presale listings (settled off-chain for now); payloads up to 1,523,681 bytes with every byte's decryption proven (files over 1,953 bytes in 23.8 KB proven parts whose ciphertext and proofs the relay stores by content address, [big payloads](docs/big-payloads.md)); optional multithreaded proving.
-
-Not yet: mainnet, an audit, on-chain presale settlement, a hosted seller agent, and a full wallet. Big files are slow to seal in a single-threaded browser tab (about 100 s per 23.8 KB part). Details in the [security model](docs/security-model.md#known-limits).
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately per [SECURITY.md](SECURITY.md).
+Lintel is testnet software and has not been audited; do not use it with real funds. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md), not in public issues. Bugs, questions and ideas: [GitHub issues](https://github.com/Godwin-web3/lintel/issues). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-Licensed under either of
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
-
-at your option. Unless you explicitly state otherwise, any contribution you submit for inclusion is dual licensed as above, without additional terms. Brand fonts are under the SIL Open Font License.
+Licensed under either of Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)) or MIT license ([LICENSE-MIT](LICENSE-MIT)), at your option. Unless you explicitly state otherwise, any contribution you submit for inclusion is dual licensed as above, without additional terms. Brand fonts are under the SIL Open Font License.

@@ -7,7 +7,13 @@ Selling a digital thing where the buyer needs proof before paying and the seller
 A lintel is the beam across two posts that makes a doorway. It stands only when both posts carry it. Buyer and seller each hold half of the signature; neither can settle alone.
 
 **Is this on mainnet?**
-No. Zcash testnet only, unaudited. Get testnet coins (TAZ) from a faucet; see the [Quickstart](quickstart.md).
+No. Zcash testnet only, unaudited, and mainnet is not planned until testnet is solid and the code has been reviewed ([Production gate](production.md)). Get testnet coins (TAZ) from a faucet; see the [Quickstart](quickstart.md).
+
+**Can I check a listing without buying?**
+Yes. Paste its ID into [/verify](https://lintel-godwin-web3s-projects.vercel.app/verify): your browser checks every proof, with no wallet.
+
+**Once I buy something, is it mine alone?**
+No. Lintel makes the exchange fair, but after a single-copy sale settles the key can be computed by anyone who reads the sale's public record on the relay and the mined settlement. See the [Threat model](threat-model.md#after-the-sale).
 
 **What does the proof actually prove?**
 That the ciphertext decrypts, under the secret behind the listed point `T`, to content whose hash is the listed `h`. It doesn't prove the content is useful to you; it proves you'll get exactly the content the seller committed to.
