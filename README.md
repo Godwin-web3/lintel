@@ -63,7 +63,7 @@ A browser sale with both sides in the web app took 6 minutes 34 seconds end to e
 | Refund backup | Not done: the signed refund lives only in the buyer's browser storage |
 | Hosted seller agent | Not offered: the agent holds the listing's secrets, so it runs on the seller's machine |
 | Full wallet | Not done: the device wallet only knows notes scanned in by txid |
-| More claim types | Signed attestations and dataset predicates are designs only ([proven claims](docs/predicates.md)); claims need offer v3 and byte claims must sit in the first 23,777 bytes |
+| More claim types | Signed attestations and dataset predicates are designs only ([proven claims](docs/predicates.md)); claims need offer v3, byte claims must sit in the first 23,777 bytes, and the SDK and MCP server do not expose claims yet |
 | Fast big-file sealing in a browser tab | About 100 s per 23.8 KB part single-threaded (1 MB: over an hour); 1 MB took 9.5 minutes natively on 2 vCPU |
 
 Full status: [What ships when](docs/what-ships-when.md).

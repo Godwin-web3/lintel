@@ -36,7 +36,7 @@ What works on Zcash testnet today, what does not exist yet, and what has to happ
 | Relay privacy for escrows | Not provided | The relay operator can derive the escrow viewing key from the public session fields and see escrow balances. It cannot spend them. |
 | Fast big-file sealing in a browser tab | Not done | About 100 s per 23.8 KB part single-threaded, so a 1 MB file takes over an hour in a tab. Natively, 1 MB took 9.5 minutes on 2 vCPU. The threaded build was not benchmarked for big offers. |
 | Blob garbage collection on the relay | Not done | Blob uploads are open (size and quota capped) and unreferenced blobs are not removed. |
-| More claim types (signed attestations, dataset predicates) | Design only | `docs/predicates.md` sketches them; only the `Format` predicate (length, prefix, bytes at an offset) is implemented. Claims need offer v3 (a short file with claims pays for one big-part proof) and byte claims must lie in the first 23,777 bytes. |
+| More claim types (signed attestations, dataset predicates) | Design only | `docs/predicates.md` sketches them; only the `Format` predicate (length, prefix, bytes at an offset) is implemented. Claims need offer v3 (a short file with claims pays for one big-part proof) and byte claims must lie in the first 23,777 bytes. The SDK and MCP server do not expose claims yet: claims are made and checked in the web app. |
 | "Proven core + bulk" for files over 1.5 MB | Not done | Everything sold today is fully proven; nothing larger is offered. |
 | Min-value disclosure in the app | Engine only | `engine/src/disclosure.rs` has a tested circuit; the web app does not use it. |
 
