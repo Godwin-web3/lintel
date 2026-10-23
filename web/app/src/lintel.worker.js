@@ -65,7 +65,18 @@ function ensureBig() {
   return bigLoad.catch((e) => { bigLoad = null; throw e; });
 }
 const NEEDS_KEYS = new Set(['verifyOffer', 'unlock', 'unlockFromTx', 'verifyUnit', 'buyerOrder', 'buyerUnlock']);
-const isBig = (v) => typeof v === 'string' && v.includes('"v":3');
+// True when `v` is (or wraps) an offer v3. The offer arrives inline as JSON,
+// or nested as the JSON-string `offer` of a presale unit (escaped quotes), so
+// parse each layer and check the version field instead of matching substrings.
+const isBig = (v, depth = 0) => {
+  if (depth > 3 || v == null) return false;
+  if (typeof v === 'string') {
+    try { return isBig(JSON.parse(v), depth + 1); } catch { return false; }
+  }
+  if (typeof v !== 'object') return false;
+  if (v.v === 3) return true;
+  return v.offer != null && isBig(v.offer, depth + 1);
+};
 
 // Proves every part of a BigSealer, reporting progress; returns the blobs.
 function proveAll(sealer, progress) {

@@ -38,9 +38,11 @@ try {
   const lid = listings.find((l) => l.title === 'Claims UI test').id;
   const bp = await (await browser.newContext()).newPage();
   bp.on('pageerror', (e) => console.error('buyer pageerror', e.message));
+  bp.on('console', (m) => { if (m.type() === 'error') console.error('buyer console', m.text()); });
   await bp.goto(`${app}/#/listing/${lid}`);
   await bp.waitForSelector('.proof.ok, .proof.bad', { timeout: 600000 });
   const proof = await bp.textContent('.proof');
+  console.log('buyer proof panel:', proof);
   ok(/Proof verified/.test(proof), 'buyer verified the proof');
   ok(/Also proven about that content/.test(proof) && /Starts with "%PDF-"/.test(proof) && /Length between 2,000 and 4,000 bytes/.test(proof), 'buyer sees the proven claims');
   console.log('PASS');
