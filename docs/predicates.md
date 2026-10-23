@@ -96,17 +96,21 @@ selectors, and no new lookup argument.
 ### Cost
 
 Measured with `cargo run --release --example bench_parts -- claims 768`: one
-23,777-byte part, hash-only and with all three claims, alternating in the same
-process on the same 2 vCPU aarch64 machine.
+23,777-byte part, hash-only and with all three claims (prefix, a 32-byte
+field, length bounds), alternating in the same process, three rounds each, on
+the same 2 vCPU aarch64 machine as the [Big payloads](big-payloads.md)
+numbers. The machine was shared with other jobs during the run, so wall times
+were noisy; process CPU time (both cores, user + system) was steady to within
+0.5% and is the fair comparison.
 
-| | Hash only | With claims (`Format`) |
-| --- | --- | --- |
-| Prove one part | see table below | see table below |
-| Verify one part | 0.19 s | 0.19 s |
-| Proof | 4,480 bytes | 4,544 bytes |
-| Key generation | (29 s with parameters) | 16.6 s extra, once, from the same parameters |
-
-PROVE_TABLE
+| One part (n = 768, k = 15) | Hash only | With claims (`Format`) | Change |
+| --- | --- | --- | --- |
+| Prove, CPU time | 24.8 s | 25.6 s | **+3.3%** |
+| Prove, wall time (quiet machine) | 13.5 s (measured) | about 13.9 s (from the CPU ratio) | about +0.4 s |
+| Verify (quiet machine) | 0.19 s | 0.19 s | none measurable (0.38 s vs 0.37 s under load) |
+| Proof | 4,480 bytes | 4,544 bytes | +64 bytes |
+| Keys | 29 s with parameter generation | +7.9 s once, derived from the same parameters | |
+| Peak memory | 1,029 MB | 1,438 MB with both key sets loaded | +409 MB |
 
 Only part 0 carries claims; parts 1 and up are unchanged hash-only proofs.
 One cost does change in the app: claims need offer v3, so a short file with
@@ -196,5 +200,7 @@ every record's field `f` lies in `[lo, hi]`".
   bytes, more than two byte claims or claims longer than 32 bytes are not
   supported yet.
 - Claims are public. A prefix or field claim reveals those bytes.
+- Sealing or verifying an offer with claims holds a second key set (about
+  400 MB more natively; the browser tab's memory grows similarly).
 - A claim says what the bytes are, not that they are useful: "starts with
   `%PDF`" does not mean the PDF is the report the buyer wants.
