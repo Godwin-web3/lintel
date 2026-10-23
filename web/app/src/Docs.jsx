@@ -13,7 +13,7 @@ const source = (file) => FILES[`../../../docs/${file}`];
 
 export const NAV = [
   ['Start here', [['', 'Overview', 'README.md'], ['quickstart', 'Quickstart', 'quickstart.md'], ['what-ships-when', 'What ships when', 'what-ships-when.md'], ['faq', 'FAQ', 'faq.md']]],
-  ['Build on Lintel', [['self-hosting', 'Self-hosting', 'self-hosting.md'], ['cli', 'CLI and seller agent', 'cli.md'], ['architecture', 'Architecture', 'architecture.md'], ['testnet-evidence', 'Testnet evidence', 'testnet-evidence.md']]],
+  ['Build on Lintel', [['sdk', 'SDK (TypeScript)', 'sdk.md'], ['agents', 'Agents (MCP)', 'agents.md'], ['self-hosting', 'Self-hosting', 'self-hosting.md'], ['cli', 'CLI and seller agent', 'cli.md'], ['architecture', 'Architecture', 'architecture.md'], ['testnet-evidence', 'Testnet evidence', 'testnet-evidence.md']]],
   ['How it works', [['how-it-works', 'The protocol', 'how-it-works.md'], ['security-model', 'Security model', 'security-model.md'], ['threat-model', 'Threat model', 'threat-model.md'], ['compare', 'How Lintel compares', 'compare.md'], ['onchain', 'On-chain settlement, in depth', 'onchain.md'], ['big-payloads', 'Big payloads', 'big-payloads.md'], ['relay-perf', 'Presale, relay and proving', 'relay-perf.md']]],
   ['Deeper', [['production', 'Production gate', 'production.md'], ['whitepaper', 'Whitepaper', 'whitepaper.md'], ['settlement', 'Early design note', 'settlement.md']]],
 ];

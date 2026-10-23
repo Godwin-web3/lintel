@@ -1,0 +1,55 @@
+{
+  "name": "lintel-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Lintel: AI agents browse, verify and buy (or sell) sealed data on Zcash testnet under owner-set spending limits. Keys stay server-side; every spend is logged.",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "homepage": "https://github.com/Godwin-web3/lintel/blob/main/docs/agents.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Godwin-web3/lintel.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/Godwin-web3/lintel/issues"
+  },
+  "keywords": ["lintel", "mcp", "model-context-protocol", "ai-agents", "zcash", "testnet", "spending-limits", "zero-knowledge"],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "lintel-mcp": "dist/index.js"
+  },
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./policy": {
+      "types": "./dist/policy.d.ts",
+      "default": "./dist/policy.js"
+    }
+  },
+  "files": [
+    "dist",
+    "policy.example.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "lintel-sdk": "^0.1.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

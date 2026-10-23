@@ -2,3 +2,4 @@
 *.SECRET.json
 *.secret.json
 *.SECRET.*
+node_modules/

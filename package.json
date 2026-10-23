@@ -1,0 +1,16 @@
+{
+  "name": "lintel-workspace",
+  "private": true,
+  "description": "npm workspaces for the Lintel developer packages (SDK, MCP server, starter, examples). The engine, relay and app build on their own.",
+  "workspaces": [
+    "packages/sdk",
+    "packages/mcp",
+    "packages/create-lintel-app",
+    "examples"
+  ],
+  "scripts": {
+    "build": "npm run build -w lintel-sdk && npm run build -w lintel-mcp",
+    "test": "npm test -w lintel-sdk && npm test -w lintel-mcp && npm test -w create-lintel-app"
+  },
+  "license": "MIT OR Apache-2.0"
+}

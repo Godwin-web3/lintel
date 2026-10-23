@@ -1,0 +1,31 @@
+{
+  "name": "create-lintel-app",
+  "version": "0.1.0",
+  "description": "Scaffold a Vite app that verifies and buys a Lintel listing on Zcash testnet with lintel-sdk: npm create lintel-app.",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "homepage": "https://github.com/Godwin-web3/lintel/blob/main/docs/sdk.md#starter-app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Godwin-web3/lintel.git",
+    "directory": "packages/create-lintel-app"
+  },
+  "bugs": {
+    "url": "https://github.com/Godwin-web3/lintel/issues"
+  },
+  "keywords": ["lintel", "create-lintel-app", "zcash", "testnet", "vite", "starter"],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "create-lintel-app": "bin/index.mjs"
+  },
+  "files": [
+    "bin",
+    "template",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "$comment": "Owner-set limits for lintel-mcp (Zcash testnet). Amounts are TAZ decimal strings. The counted amount is the outlay at funding: price + escrow fees + lock coin + funding fee.",
+  "agent": "research-agent",
+  "maxPerPurchaseZec": "0.05",
+  "maxPerDayZec": "0.2",
+  "allowedSellers": "any",
+  "allowedListings": "any",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "allowSelling": false
+}

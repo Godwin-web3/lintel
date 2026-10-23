@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "skipLibCheck": true,
+    "noUnusedLocals": true,
+    "esModuleInterop": true,
+    "allowJs": false
+  },
+  "include": ["src"]
+}
