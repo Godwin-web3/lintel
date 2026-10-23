@@ -13,7 +13,7 @@ The cryptography (Halo 2 circuits, adaptor signatures, escrow and refund constru
 ## Known limits
 
 - The signed refund lives only in the buyer's browser storage. Clearing site data while an escrow is open loses it.
-- After a single-copy sale settles, the content can be decrypted by anyone who reads the sale's public record on the relay and the mined settlement.
+- After a sale, the buyer and the seller (and whoever runs the seller's agent) hold the key; nothing stops them from sharing the content. Single-copy sales settled before the session-privacy fix (October 2026) wrote the seller's partial signature in the clear, so their content can be decrypted by anyone who copied that record.
 - The relay operator can see escrow balances, and can delay or drop messages.
 - Someone must act for the seller (the seller's open app or `lintel-agent`) or the sale times out and the buyer refunds after about 60 blocks.
 - Multi-copy listings settle off-chain and move no coins.

@@ -11,7 +11,14 @@
 //
 // Writes are write-once and gated by bearer tokens the relay hands out:
 // seller_token (on listing creation) and buyer_token (on session creation).
-// Tokens only stop third parties from overwriting fields; they protect no secret.
+//
+// Session reads (GET /sessions/:id, and the session in GET /listings/:id)
+// return the full record only with the session's buyer or seller token;
+// anyone else gets a status view (stage flags and the public txids). This is
+// defence in depth, not the privacy boundary: the settlement partial is
+// stored with s_b masked to the buyer (partial wire v2), so even the full
+// record plus the mined settlement does not give t. A plain (v1) partial is
+// accepted only for the refund, whose adaptor point is the identity.
 //
 // Two listing kinds:
 // * v1 (no `version`): one adaptor secret, one sale, interactive (seller online
@@ -164,6 +171,37 @@ function publicSession(s) {
   const { buyer_token_hash, ...rest } = s;
   return rest;
 }
+// The session as `auth` may see it: full for its buyer and seller, otherwise
+// a status view with no partial, pre-signature, signature, proofs, keys,
+// addresses or PCZTs (the funding and settlement txids are public on chain).
+function sessionFor(s, auth) {
+  if (!s) return null;
+  const l = db.listings[s.listing_id];
+  if (tokOk(auth, s.buyer_token_hash) || (l && tokOk(auth, l.seller_token_hash))) return publicSession(s);
+  const ch = s.chain || {};
+  const chain = {};
+  for (const k of ['funding_txid', 'settle_txid']) if (ch[k] !== undefined) chain[k] = ch[k];
+  return {
+    id: s.id, listing_id: s.listing_id, created_at: s.created_at, mode: s.mode, redacted: true,
+    stage: { partial: !!s.partial, presig: !!s.presig, signature: !!s.signature },
+    ...(s.mode === 'chain' ? { chain } : {}),
+  };
+}
+// Partial wire format (engine protocol::PartialWire). The settlement partial
+// must be v2: s_b masked to the buyer, never in the clear. A partial in the
+// clear (v1) is allowed only where T is the identity (the refund).
+const IDENTITY = '0'.repeat(64);
+function checkPartial(str, { settle, t_point }) {
+  let p; try { p = JSON.parse(str); } catch { throw new Bad('partial must be JSON'); }
+  need(p && typeof p === 'object' && isHex(p.r_b, 64) && isHex(p.t_point, 64), 'partial needs r_b and t_point');
+  if (settle) {
+    need(p.v === 2 && p.s_b === undefined && isHex(p.enc_sb, 64) && isHex(p.vk_a, 64) && isHex(p.vk_b, 64),
+      'settlement partial must be masked to the buyer (partial v2: enc_sb, no s_b); update the seller app or lintel-agent');
+    need(!t_point || p.t_point === t_point, 'partial is locked to a different T than the listing');
+  } else {
+    need(p.v === undefined && isHex(p.s_b, 64) && p.t_point === IDENTITY, 'refund partial must be v1 with T = identity');
+  }
+}
 
 // ---- on-chain settlement (public data only) ----
 //
@@ -186,7 +224,13 @@ const CHAIN_FIELDS = {
   merchant_contrib: ['seller', (v) => isHex(v, 64)],
   merchant_address: ['seller', UA],
   escrow_address: ['seller', UA],
-  refund_partial: ['seller', (v) => jsonStr(v, 1024)],
+  refund_partial: ['seller', (v) => {
+    if (!jsonStr(v, 2048)) return false;
+    const o = JSON.parse(v);
+    if (!o || typeof o.partial !== 'string' || !jsonStr(o.pok, 1024)) return false;
+    checkPartial(o.partial, { settle: false });
+    return true;
+  }],
   settle_terms: ['seller', (v) => jsonStr(v, 2048)],
   settle_pczt: ['seller', B64],
   settle_txid: ['seller', (v) => isHex(v, 64)],
@@ -267,10 +311,10 @@ const routes = [
     return { listing: publicListing(l), seller_token: tok };
   }],
 
-  ['GET', /^\/listings\/([\w-]+)$/, ([lid]) => {
+  ['GET', /^\/listings\/([\w-]+)$/, ([lid], _, auth) => {
     const l = db.listings[lid]; if (!l) throw new Bad('not found', 404);
     if (l.version === 2) return { listing: publicListing(l), session: null };
-    return { listing: publicListing(l), session: l.session_id ? publicSession(db.sessions[l.session_id]) : null };
+    return { listing: publicListing(l), session: l.session_id ? sessionFor(db.sessions[l.session_id], auth) : null };
   }],
 
   // A listing sells once: its adaptor secret is public after the first
@@ -306,9 +350,9 @@ const routes = [
     return { session: publicSession(s), buyer_token: tok };
   }],
 
-  ['GET', /^\/sessions\/([\w-]+)$/, ([sid]) => {
+  ['GET', /^\/sessions\/([\w-]+)$/, ([sid], _, auth) => {
     const s = db.sessions[sid]; if (!s) throw new Bad('not found', 404);
-    return { session: publicSession(s) };
+    return { session: sessionFor(s, auth) };
   }],
 
   ['POST', /^\/sessions\/([\w-]+)\/partial$/, ([sid], body, auth) => {
@@ -317,6 +361,7 @@ const routes = [
     need(!s.partial, 'partial already set');
     if (s.mode === 'chain') need(s.chain?.settle_r_a && s.chain?.settle_pczt, 'on-chain session: settlement PCZT and nonce first');
     need(jsonStr(body.partial, 1024) && jsonStr(body.merchant_pok, 1024), 'partial and merchant_pok must be JSON');
+    checkPartial(body.partial, { settle: true, t_point: db.listings[s.listing_id].t_point });
     s.partial = body.partial; s.merchant_pok = body.merchant_pok; save();
     return { session: publicSession(s) };
   }],

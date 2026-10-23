@@ -153,6 +153,7 @@ export function HowItWorks() {
               <li><b>Neither side settles alone.</b> The escrow’s spend key is the sum of both shares; a spend needs a signature only both together can make.</li>
               <li><b>The key comes from the chain.</b> The buyer extracts <code>t</code> from the mined settlement and verifies the signature itself. The relay is not trusted for it.</li>
               <li><b>A refund exists before funding.</b> Consensus rejects it until the settlement window closes, so the refund and the settlement are never valid at the same height.</li>
+              <li><b>Only the buyer learns the key.</b> The seller’s half of the signature reaches the buyer masked, so the relay’s records plus the mined settlement do not give <code>t</code> to anyone else. <Link to="/docs/threat-model#after-the-sale">Details</Link></li>
               <li><b>Secrets stay with their owner.</b> Key shares, <code>t</code> and plaintext never reach the relay; it carries public data only.</li>
             </ul>
           </div>

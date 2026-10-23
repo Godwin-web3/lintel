@@ -78,6 +78,28 @@ test('buy (off-chain rehearsal): seller and buyer step in turn; buyer decrypts',
   assert.equal(new TextDecoder().decode((await purchase.step()).plaintext), secret);
 });
 
+test('session privacy: only the buyer and seller read the full session; the partial is masked to the buyer', async () => {
+  const outsider = await createLintel({ relayUrl: relay.url, store: new MemoryStore() });
+  const pub = (await outsider.listing(listingId)).session;
+  assert.equal(pub.redacted, true, 'no token: status view');
+  assert.deepEqual(pub.stage, { partial: true, presig: true, signature: true });
+  for (const k of ['partial', 'presig', 'signature', 'merchant_pok', 'payer_vk', 'r_a', 'alpha', 'sighash']) assert.ok(!(k in pub), `status view leaks ${k}`);
+  const st = await outsider.status(listingId);
+  assert.equal(st.phase, 'settled', 'status still works from the status view');
+  assert.equal(st.mode, 'relay');
+  const raw = await outsider.relay.session(pub.id);
+  assert.equal(raw.redacted, true);
+  // buyer (buyer token) and seller (seller token) get the full record
+  const mine = (await buyer.listing(listingId)).session;
+  assert.ok(!mine.redacted && mine.signature && mine.presig, 'buyer sees the full session');
+  assert.ok(!(await seller.listing(listingId)).session.redacted, 'seller sees the full session');
+  const w = JSON.parse(mine.partial);
+  assert.equal(w.v, 2, 'settlement partial is wire v2');
+  assert.ok(!('s_b' in w) && /^[0-9a-f]{64}$/.test(w.enc_sb), 's_b masked to the buyer');
+  // a wrong token is no better than none
+  assert.equal((await outsider.relay.session(pub.id, 'not-a-token')).redacted, true);
+});
+
 test('a sold listing refuses a second buyer', async () => {
   const other = await createLintel({ relayUrl: relay.url });
   await assert.rejects(other.buy(listingId, { mode: 'relay' }).step(), (e) => e.status === 409);

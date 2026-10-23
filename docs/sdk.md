@@ -80,7 +80,7 @@ Returns a `Lintel` client. Node resolves `lintel-sdk` to the Node build (WASM an
 | Method | Returns |
 | --- | --- |
 | `lintel.listings()` | All listings, newest first (list view, offers omitted) |
-| `lintel.listing(id)` | `{ listing, session }`: one listing with its offer and current session |
+| `lintel.listing(id)` | `{ listing, session }`: one listing with its offer and current session. The relay serves the full session only to its buyer and seller: when this store sells or is buying the listing, its token is sent; otherwise `session` is the status view (`redacted: true`, `stage`, public txids) |
 | `lintel.status(id)` | `ListingStatus`: `phase`, relay `status`, `mode`, `txids`, `label` |
 | `lintel.verify(idOrListing)` | `VerifyResult` or throws. Verifies every proof locally against the listing's content hash and checks the offer's T matches the listing |
 

@@ -13,7 +13,7 @@ No. Zcash testnet only, unaudited, and mainnet is not planned until testnet is s
 Yes. Paste its ID into [/verify](https://lintel-godwin-web3s-projects.vercel.app/verify): your browser checks every proof, with no wallet.
 
 **Once I buy something, is it mine alone?**
-No. Lintel makes the exchange fair, but after a single-copy sale settles the key can be computed by anyone who reads the sale's public record on the relay and the mined settlement. See the [Threat model](threat-model.md#after-the-sale).
+Only you and the seller get the key. The seller's half of the signature is published masked to you, so someone who reads the relay and the mined settlement still cannot compute the key, and the relay shows a sale's record only to its buyer and seller. Nothing stops you or the seller from sharing the file afterwards, and sales settled before this fix are exposed. See the [Threat model](threat-model.md#after-the-sale).
 
 **What does the proof actually prove?**
 That the ciphertext decrypts, under the secret behind the listed point `T`, to content whose hash is the listed `h`. It doesn't prove the content is useful to you; it proves you'll get exactly the content the seller committed to.

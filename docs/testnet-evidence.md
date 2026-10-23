@@ -2,6 +2,15 @@
 
 Every flow below ran on Zcash testnet (NU7, Ironwood pool, v6 transactions) and was mined, newest first. Raw records are in [`docs/testnet/`](testnet/). Amounts are in zatoshis (1 TAZ = 100,000,000 zats).
 
+## Session privacy: single-copy sale with the key kept to the buyer
+
+Price 0.005 TAZ, seller side run only by `lintel-agent`, after the session-privacy change. The agent co-signed the time-locked refund (lock 4,531,941) before funding, then sent the settlement partial signature with the seller's share `s_b` masked to the buyer (partial wire v2: `enc_sb`, no `s_b` in the clear), and built, proved and broadcast the settlement. The payout address received 500,000 zats. The buyer read the session with its buyer token, opened the masked partial with its own key share, recovered `t` from the mined settlement and the decrypted content matched the listing's content hash. Reading the same session from the run's relay state with no token (`GET /sessions/Aqpo6O9lNJ0U`, `GET /listings/-U_JeIDwqek5`) returned only the redacted status view: stage flags and the public funding and settlement txids, no partial, pre-signature, keys or PCZTs. Record: [`testnet/evidence-session-privacy-sale.json`](testnet/evidence-session-privacy-sale.json).
+
+| Step | Height | Txid |
+| --- | --- | --- |
+| Funding | 4,531,883 | `31effa433142328bb1dea17c010869efbadf59e6bbee5d50592089c61266f7e7` |
+| Settlement | 4,531,887 | `bd7d9d69db555eeb21170a77d36c16332f06d39eb900c34658eb906055d00cdc` |
+
 ## Pay from another wallet (buyer without a device wallet)
 
 Price 0.02 TAZ, seller side run only by `lintel-agent`. The buyer's app opened a per-purchase pay-in wallet and showed a ZIP 321 request for 2,055,000 zats (escrow 2,020,000 + lock coin 20,000 + funding fee 15,000). A separate wallet paid it; the buyer detected the mined payment, funded the escrow straight from it (no sweep transaction), had the time-locked refund co-signed before broadcasting the funding, and decrypted the content from the mined settlement. What was left in the pay-in wallet was then withdrawn. The paying wallet was a stand-in (a separate key driven by `live_agent_sale external-pay` that reads only the URI), not a third-party wallet app. Records: [`testnet/evidence-payin-transparent-sale.json`](testnet/evidence-payin-transparent-sale.json), [`testnet/evidence-payin-shielded-sale.json`](testnet/evidence-payin-shielded-sale.json).

@@ -34,12 +34,15 @@ DIR defaults to $LINTEL_AGENT_DIR, else ~/.lintel-agent. SECRET: keep it private
 
 // ---------------------------------------------------------------- relay over HTTP
 
-struct HttpRelay { base: String, http: reqwest::Client }
+/// `token`: the listing's seller token. Sent on reads too: the relay returns
+/// the full session record (partial, pre-signature, chain fields) only to the
+/// session's buyer and seller, and a redacted status view to anyone else.
+struct HttpRelay { base: String, http: reqwest::Client, token: String }
 
 impl HttpRelay {
-    fn new(base: &str) -> Result<Self> {
+    fn new(base: &str, token: &str) -> Result<Self> {
         let http = reqwest::Client::builder().timeout(Duration::from_secs(30)).build()?;
-        Ok(Self { base: base.trim_end_matches('/').to_string(), http })
+        Ok(Self { base: base.trim_end_matches('/').to_string(), http, token: token.to_string() })
     }
     async fn call(&self, method: reqwest::Method, path: &str, body: Option<Value>, token: Option<&str>) -> Result<Value> {
         let mut rq = self.http.request(method, format!("{}{}", self.base, path));
@@ -57,7 +60,7 @@ impl HttpRelay {
 
 impl agent::Relay for HttpRelay {
     async fn listing(&self, lid: &str) -> Result<(Value, Value)> {
-        let v = self.call(reqwest::Method::GET, &format!("/listings/{lid}"), None, None).await?;
+        let v = self.call(reqwest::Method::GET, &format!("/listings/{lid}"), None, Some(&self.token)).await?;
         Ok((v["listing"].clone(), v["session"].clone()))
     }
     async fn post_chain(&self, sid: &str, field: &str, value: &str, token: &str) -> Result<()> {
@@ -190,7 +193,7 @@ async fn import(a: &Args) -> Result<()> {
     ensure_dir(&dir)?;
     let path = listing_path(&dir, &l.listing_id)?;
     ensure!(a.has("--force") || !path.exists(), "{} is already imported (use --force to replace it)", l.listing_id);
-    let relay = HttpRelay::new(&l.relay)?;
+    let relay = HttpRelay::new(&l.relay, &l.token)?;
     let (listing, session) = agent::Relay::listing(&relay, &l.listing_id).await?;
     agent::check_listing_matches(&l, &listing)?;
     ensure!(listing["status"].as_str() != Some("sold"), "listing is already sold");
@@ -217,7 +220,7 @@ async fn run(a: &Args) -> Result<()> {
         if listings.is_empty() { println!("no listings imported yet; run `lintel-agent import <handoff.json>`"); }
         for mut l in listings {
             if l.chain.sold_height.is_some() { continue; }
-            let relay = match HttpRelay::new(&l.relay) { Ok(r) => r, Err(e) => { log(&l.listing_id, &format!("error: {e:#}")); continue } };
+            let relay = match HttpRelay::new(&l.relay, &l.token) { Ok(r) => r, Err(e) => { log(&l.listing_id, &format!("error: {e:#}")); continue } };
             // Up to a few steps per tick, so a sale moves as fast as both sides allow.
             for _ in 0..4 {
                 let mut persist = |x: &AgentListing| save(&dir, x);

@@ -91,7 +91,7 @@ PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core/index.js node scripts/benc
 - **Multi-copy listings settle off-chain**: the completed signature travels
   through the relay and no coins move.
 - **Copies are pre-sealed.** Each copy costs the seller one proof per part at
-  listing time. v1 listings sell once (`t` becomes public after the sale).
+  listing time. v1 listings sell once (one `t` per listing; after the sale the buyer and seller hold it).
 - **Big files are slow to seal in a browser**: about 100 s per 23.8 KB part
   single-threaded (over an hour for 1 MB); small files 15 to 30 s; verifying is
   about 0.5 s per small proof and 1.5 s per big part.

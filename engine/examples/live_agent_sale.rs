@@ -66,10 +66,12 @@ fn sc_hex(s: &pasta_curves::pallas::Scalar) -> String { hex::encode(s.to_repr())
 
 // ---------------------------------------------------------------- relay over HTTP
 
-struct Relay { base: String, http: reqwest::Client }
+/// `read_token`: the buyer token, sent on reads once the session exists (the
+/// relay returns the full session record only to its buyer and seller).
+struct Relay { base: String, http: reqwest::Client, read_token: std::sync::Mutex<Option<String>> }
 impl Relay {
     fn new(base: &str) -> Result<Self> {
-        Ok(Self { base: base.trim_end_matches('/').into(), http: reqwest::Client::builder().timeout(Duration::from_secs(30)).build()? })
+        Ok(Self { base: base.trim_end_matches('/').into(), http: reqwest::Client::builder().timeout(Duration::from_secs(30)).build()?, read_token: Default::default() })
     }
     async fn call(&self, method: reqwest::Method, path: &str, body: Option<Value>, token: Option<&str>) -> Result<Value> {
         let mut rq = self.http.request(method, format!("{}{}", self.base, path));
@@ -81,7 +83,10 @@ impl Relay {
         ensure!(status.is_success(), "relay {path}: {} {}", status, v["error"]);
         Ok(v)
     }
-    async fn get(&self, path: &str) -> Result<Value> { self.call(reqwest::Method::GET, path, None, None).await }
+    async fn get(&self, path: &str) -> Result<Value> {
+        let tok = self.read_token.lock().unwrap().clone();
+        self.call(reqwest::Method::GET, path, None, tok.as_deref()).await
+    }
     async fn post(&self, path: &str, body: Value, token: Option<&str>) -> Result<Value> { self.call(reqwest::Method::POST, path, Some(body), token).await }
     async fn put_blob(&self, id: &str, bytes: &[u8]) -> Result<()> {
         let res = self.http.put(format!("{}/blobs/{id}", self.base)).body(bytes.to_vec()).send().await.context("relay PUT /blobs")?;
@@ -259,6 +264,7 @@ async fn buyer(dir: &str, relay_url: &str, payin_mode: bool) -> Result<()> {
     let r = relay.post(&format!("/listings/{lid}/sessions"), json!({ "payer_vk": pt_hex(&payer.vk_a), "mode": "chain" }), None).await?;
     let sid = r["session"]["id"].as_str().unwrap().to_string();
     let tok = r["buyer_token"].as_str().unwrap().to_string();
+    *relay.read_token.lock().unwrap() = Some(tok.clone());
     let post = |field: &'static str, value: String| {
         let (relay, sid, tok) = (&relay, sid.clone(), tok.clone());
         async move { relay.post(&format!("/sessions/{sid}/chain/{field}"), json!({ "value": value }), Some(&tok)).await.map(|_| ()) }
@@ -363,7 +369,8 @@ async fn buyer(dir: &str, relay_url: &str, payin_mode: bool) -> Result<()> {
 
     // ---- B7: pre-sign, locked to the listing's T
     let s = wait_for(&relay, &sid, "partial signature", |s| s["partial"].is_string()).await?;
-    let partial = agent::partial_from(s["partial"].as_str().unwrap())?;
+    // The settlement partial is masked to this payer (v2 wire): only our key share opens it.
+    let partial = payer.open_partial(s["partial"].as_str().unwrap(), Some(merchant_vk)).map_err(|e| anyhow!(e))?;
     ensure!(partial.t_point == t_listing, "partial is locked to a different T than the verified offer");
     let mpok = agent::pok_from(s["merchant_pok"].as_str().unwrap())?;
     let pre = payer.pre_sign(merchant_vk, &partial, &hex::decode(&s_info.sighash)?, sid.as_bytes(), &mpok, parse_scalar(&s_info.alpha).unwrap()).map_err(|e| anyhow!(e))?;

@@ -26,7 +26,7 @@ These live in the browser's memory and `localStorage`. Clearing site data delete
 
 ## What the relay sees
 
-The relay is a public bulletin board plus a chain proxy. It stores listings (ciphertext, `T`, `h`, proof, price), session fields (verification keys, proofs of knowledge, key contributions, addresses, agreed terms, unsigned PCZTs, nonce points, partial and pre-signatures, txids) and presale orders. Session fields are write-once and each party authenticates its own writes.
+The relay is a public bulletin board plus a chain proxy. It stores listings (ciphertext, `T`, `h`, proof, price), session fields (verification keys, proofs of knowledge, key contributions, addresses, agreed terms, unsigned PCZTs, nonce points, partial and pre-signatures, txids) and presale orders. Session fields are write-once and each party authenticates its own writes. A sale's session record is served in full only to its buyer and seller (by token); others see its stage and public txids. The seller's partial signature is stored with `s_b` masked to the buyer, so the record plus the mined settlement does not give `t` ([Threat model](threat-model.md#after-the-sale)).
 
 What the relay operator can do with that:
 

@@ -35,6 +35,7 @@ Every row below runs on Zcash testnet (NU7, Ironwood pool, v6 transactions). Tra
 | Refund after the lock (browser) | Works, mined | refund [`992163c4a2…`](https://lintel-relay.onrender.com/chain/tx/992163c4a20b3cc2e363b3720aeac8f25162c81bc795736d285b0b1bd3e43392) (4,522,635, `nLockTime` 4,522,631) |
 | Time lock enforced by consensus (early refund rejected, mined after the lock) | Works, mined | refund [`e78f088e5b…`](https://lintel-relay.onrender.com/chain/tx/e78f088e5bae544378439cf8e665fca72abe1f0f1157feaf0167acf1502963b8) (4,522,335) |
 | Seller agent `lintel-agent`, seller's browser closed | Works, mined | settlement [`5104f5af57…`](https://lintel-relay.onrender.com/chain/tx/5104f5af5766142cdeeba4d742b24c37149cbfdeaadbe51dd501d99e7c9aacc2) (4,529,908) |
+| Key stays with the buyer: seller's share masked to the buyer, session records served only to buyer and seller | Works, mined | settlement [`bd7d9d69db…`](https://lintel-relay.onrender.com/chain/tx/bd7d9d69db555eeb21170a77d36c16332f06d39eb900c34658eb906055d00cdc) (4,531,887) |
 | Pay from another wallet, transparent receiver | Works, mined | payment [`d38a395f17…`](https://lintel-relay.onrender.com/chain/tx/d38a395f17644f8c27598ac5a0c5ae6c6d287dbb872ff52b793bce7b2c25e3ed) (4,529,992), settlement [`f765cb4e12…`](https://lintel-relay.onrender.com/chain/tx/f765cb4e12f3a2fa22d7afb0c6d1973a4372351460990222f72fae26405ec628) (4,530,002) |
 | Pay from another wallet, Orchard receiver (Ironwood note) | Works, mined | payment [`7375623f73…`](https://lintel-relay.onrender.com/chain/tx/7375623f73840a1e0c5c9becc4c818fb1f7233e72899839f377fdfbc33b91bd2) (4,530,006), settlement [`a7575c5e61…`](https://lintel-relay.onrender.com/chain/tx/a7575c5e61915887f8ccdd14a9cd68a7c05c155387aa8fce858ead3f5aadcf9a) (4,530,013) |
 | Multi-copy listings, buyers order while the seller is offline | Works, off-chain only (no coins move) | [How it works](docs/how-it-works.md#6-multi-copy-presale-listings) |
@@ -59,7 +60,7 @@ A browser sale with both sides in the web app took 6 minutes 34 seconds end to e
 | Mainnet | Not planned until testnet is solid and reviewed; see the [Production gate](docs/production.md) |
 | External audit | Not done |
 | On-chain settlement for multi-copy listings | Not done: they settle through the relay and move no coins |
-| Confidentiality after a sale | Not provided: after a single-copy sale settles, anyone who reads the sale's public session record and the mined settlement can compute the key ([threat model](docs/threat-model.md#after-the-sale)) |
+| Exclusivity after a sale | Not enforceable: outsiders can no longer compute the key (the seller's partial signature is masked to the buyer), but the buyer can still share what it bought, and sales settled before the fix are exposed ([threat model](docs/threat-model.md#after-the-sale)) |
 | Refund backup | Not done: the signed refund lives only in the buyer's browser storage |
 | Hosted seller agent | Not offered: the agent holds the listing's secrets, so it runs on the seller's machine |
 | Full wallet | Not done: the device wallet only knows notes scanned in by txid |
@@ -81,6 +82,7 @@ sequenceDiagram
   B->>B: verify proofs locally
   S-->>B: co-signed time-locked refund (via relay)
   B->>Z: fund joint escrow (device wallet or ZIP 321 pay-in)
+  S-->>B: partial signature, s_b masked to the buyer
   B-->>S: adaptor pre-signature locked to T
   S->>Z: settlement with completed signature
   B->>Z: read signature, t = s − s_a − s_b, decrypt

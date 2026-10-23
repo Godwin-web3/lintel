@@ -357,7 +357,10 @@ impl Buyer {
     }
     /// B7: pre-sign, locked to T (checked against the listing's T).
     fn b7(&mut self, w: &World) {
-        let partial = agent::partial_from(&w.relay.sess("partial").unwrap()).unwrap();
+        let wire = w.relay.sess("partial").unwrap();
+        assert!(protocol::WirePartial::parse(&wire).unwrap().is_masked(), "settlement partial is masked on the relay");
+        assert!(agent::partial_from(&wire).is_err(), "a masked partial cannot be read as plain");
+        let partial = self.payer.open_partial(&wire, Some(self.merchant_vk(w))).unwrap();
         let t_listing = protocol::parse_point(w.relay.listing.lock().unwrap()["t_point"].as_str().unwrap()).unwrap();
         assert_eq!(partial.t_point, t_listing, "partial is locked to the listing's T");
         let pok = agent::pok_from(&w.relay.sess("merchant_pok").unwrap()).unwrap();
@@ -374,7 +377,8 @@ impl Buyer {
         let (raw, _) = w.chain.0.lock().unwrap().mined[&txid].clone();
         let pre = self.presig.as_ref().unwrap();
         let sig = protocol::find_signature(&raw, &pre.r_hex, &pre.vk_hex, &pre.sighash_hex).unwrap();
-        let partial = agent::partial_from(&w.relay.sess("partial").unwrap()).unwrap();
+        // the buyer's own copy of the partial, unmasked with its key share alone
+        let partial = self.payer.open_partial(&w.relay.sess("partial").unwrap(), None).unwrap();
         let t = protocol::extract_t(parse_scalar(&hex::encode(&sig[32..])).unwrap(), parse_scalar(&pre.s_a_hex).unwrap(), partial.s_b);
         sealed::open(t, &w.offer).unwrap()
     }
@@ -431,7 +435,26 @@ async fn agent_sells_on_chain_with_the_seller_offline() {
     let (raw, _) = w.chain.0.lock().unwrap().mined[&settle_txid].clone();
     assert!(chain::find_notes(&raw, h, &w.merchant_fvk).unwrap().iter().any(|n| n.note.value().inner() == PRICE_ZATS));
     assert_eq!(b.b8(&w), w.payload);
-    let _ = w.t;
+
+    // An outside observer with the whole relay record (every session field,
+    // as an unauthenticated read used to return it) and the mined settlement
+    // cannot compute t: s - s_a - (anything public) is not t.
+    let sess = w.relay.session.lock().unwrap().clone();
+    let pre: protocol::PreSignature = serde_json::from_str(sess["presig"].as_str().unwrap()).unwrap();
+    let sig = protocol::find_signature(&raw, &pre.r_hex, &pre.vk_hex, &pre.sighash_hex).unwrap();
+    let s = parse_scalar(&hex::encode(&sig[32..])).unwrap();
+    let s_a = parse_scalar(&pre.s_a_hex).unwrap();
+    let wire: Value = serde_json::from_str(sess["partial"].as_str().unwrap()).unwrap();
+    assert!(wire.get("s_b").is_none(), "no s_b in the clear on the relay");
+    let enc_sb = parse_scalar(wire["enc_sb"].as_str().unwrap()).unwrap();
+    for guess in [s - s_a - enc_sb, s - s_a, s - enc_sb, s] {
+        assert_ne!(guess, w.t, "observer recovered t from relay + chain data");
+        assert!(sealed::open(guess, &w.offer).map_or(true, |p| p != w.payload), "observer decrypted the goods");
+    }
+    // the refund partial (T = identity) is the only plain one, and gives nothing
+    let rp: Value = serde_json::from_str(sess["chain"]["refund_partial"].as_str().unwrap()).unwrap();
+    let refund_partial = agent::partial_from(rp["partial"].as_str().unwrap()).unwrap();
+    assert_ne!(s - s_a - refund_partial.s_b, w.t);
 
     // the buyer's refund (held since before funding) is a valid tx too, locked past E
     let refund = chain::pczt_from_bytes(b.refund_signed.as_ref().unwrap()).unwrap();

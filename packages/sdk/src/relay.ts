@@ -2,8 +2,12 @@
 //
 // The relay stores and forwards PUBLIC data only. Writes are write-once and
 // gated by bearer tokens the relay hands out (seller_token on listing
-// creation, buyer_token on session creation). Every value read from it is
-// re-verified by the engine, so a lying relay can stall a sale, never forge one.
+// creation, buyer_token on session creation). Session reads (GET
+// /sessions/:id, and the session in GET /listings/:id) return the full record
+// only with the session's buyer or seller token; without one the relay
+// returns a redacted status view (`redacted: true`, stage flags, public
+// txids). Every value read from it is re-verified by the engine, so a lying
+// relay can stall a sale, never forge one.
 
 import type { AnyListing, BroadcastResult, ChainField, ChainTx, Hex, Listing, ListingDetail, Session } from './types.js';
 
@@ -90,8 +94,12 @@ export class RelayClient {
   // ---- listings ----
   /** All listings, newest first (list view: offers omitted). */
   async listings(): Promise<AnyListing[]> { return (await this.call<{ listings: AnyListing[] }>('GET', '/listings')).listings; }
-  /** One listing with its offer and current session (if any). */
-  listing(id: string): Promise<ListingDetail> { return this.call('GET', `/listings/${encodeURIComponent(id)}`); }
+  /**
+   * One listing with its offer and current session (if any). Pass the
+   * listing's seller token or the session's buyer token to get the full
+   * session; without one the session is the relay's redacted status view.
+   */
+  listing(id: string, token?: string): Promise<ListingDetail> { return this.call('GET', `/listings/${encodeURIComponent(id)}`, undefined, token); }
   createListing(l: NewListing): Promise<{ listing: Listing; seller_token: string }> { return this.call('POST', '/listings', l); }
   /** One presale unit with its offer. */
   unit(id: string, index: number): Promise<{ unit: any }> { return this.call('GET', `/listings/${encodeURIComponent(id)}/units/${index}`); }
@@ -100,7 +108,8 @@ export class RelayClient {
   createSession(listingId: string, body: { payer_vk: Hex; mode?: 'chain'; r_a?: Hex; alpha?: Hex; sighash?: Hex }): Promise<{ session: Session; buyer_token: string }> {
     return this.call('POST', `/listings/${encodeURIComponent(listingId)}/sessions`, body);
   }
-  async session(id: string): Promise<Session> { return (await this.call<{ session: Session }>('GET', `/sessions/${encodeURIComponent(id)}`)).session; }
+  /** A session. Full record with its buyer or seller token; otherwise the redacted status view. */
+  async session(id: string, token?: string): Promise<Session> { return (await this.call<{ session: Session }>('GET', `/sessions/${encodeURIComponent(id)}`, undefined, token)).session; }
   async postPartial(sid: string, partial: string, merchantPok: string, sellerToken: string): Promise<Session> {
     return (await this.call<{ session: Session }>('POST', `/sessions/${sid}/partial`, { partial, merchant_pok: merchantPok }, sellerToken)).session;
   }
