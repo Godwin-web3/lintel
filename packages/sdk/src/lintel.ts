@@ -57,10 +57,19 @@ export class Lintel {
   // ---------------------------------------------------------------- discovery
   /** All listings on the relay, newest first. */
   listings(): Promise<AnyListing[]> { return this.relay.listings(); }
-  /** One listing (with its offer) and its current session. */
-  listing(id: string): Promise<ListingDetail> { return this.relay.listing(id); }
+  /**
+   * One listing (with its offer) and its current session. The session is the
+   * full record when this store sells the listing or is buying it (its token
+   * is sent); otherwise the relay's redacted status view.
+   */
+  async listing(id: string): Promise<ListingDetail> { return this.relay.listing(id, await this.tokenFor(id)); }
   /** Where a listing's sale stands, plus its txids. */
-  async status(id: string): Promise<ListingStatus> { const { listing, session } = await this.relay.listing(id); return listingStatus(listing, session); }
+  async status(id: string): Promise<ListingStatus> { const { listing, session } = await this.listing(id); return listingStatus(listing, session); }
+  /** This store's relay token for a listing (seller token, else buyer token), if any. */
+  private async tokenFor(id: string): Promise<string | undefined> {
+    const s = await this.box.get();
+    return s.selling?.[id]?.token || s.buying?.[id]?.token || undefined;
+  }
 
   /**
    * Fetches a listing's offer and verifies its Halo 2 proof(s) locally

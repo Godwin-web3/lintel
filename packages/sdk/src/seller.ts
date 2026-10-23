@@ -94,7 +94,8 @@ export class Sale {
   /** Advances the seller's side by one step. */
   async step(): Promise<SaleStep> {
     const e = await this.entry();
-    const { listing, session } = await this.ctx.relay.listing(this.listingId);
+    // seller token: the relay serves the full session only to its buyer and seller
+    const { listing, session } = await this.ctx.relay.listing(this.listingId, e.token);
     const txids = { funding: session?.chain?.funding_txid, settlement: session?.chain?.settle_txid };
     if (e.delegated) return { phase: 'delegated', note: 'Handed off to lintel-agent; this store no longer acts on it', txids };
     if (!session) return { phase: 'listed', note: 'Listed; waiting for a buyer', txids };

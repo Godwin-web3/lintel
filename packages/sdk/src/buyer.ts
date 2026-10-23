@@ -173,7 +173,7 @@ export class Purchase {
   private async advanceRelay(listing: Listing): Promise<BuyStep> {
     const e = (await this.entry())!;
     const r = e.relay!;
-    const s = await this.ctx.relay.session(e.session);
+    const s = await this.ctx.relay.session(e.session, e.token);
     if (!r.presig) {
       if (!s.partial) return { phase: 'joined', note: 'Waiting for the seller\'s partial signature', txids: {} };
       const { result: presig, state } = await this.ctx.engine.withPayer(r.payerState, (p) =>
@@ -226,7 +226,7 @@ export class Purchase {
     const lid = listing.id;
     const entry = (await this.entry())!;
     const c = entry.chain!, sid = entry.session, tok = entry.token;
-    let s: Session = await relay.session(sid);
+    let s: Session = await relay.session(sid, tok);
     const ch = s.chain || {};
     const post = async (field: any, value: string) => { s = await relay.postChain(sid, field, value, tok); };
     const ownKey = async () => JSON.stringify({ kind: 'own', sk: await this.wallet.exportKey() });
@@ -369,7 +369,7 @@ export class Purchase {
   async txids(): Promise<{ funding?: string; settlement?: string; refund?: string }> {
     const e = await this.entry();
     if (!e || e.mode !== 'chain') return {};
-    const s = await this.ctx.relay.session(e.session).catch(() => null);
+    const s = await this.ctx.relay.session(e.session, e.token).catch(() => null);
     return { funding: s?.chain?.funding_txid || e.chain?.fund?.txid, settlement: s?.chain?.settle_txid, refund: e.chain?.refundInfo?.txid };
   }
 
@@ -402,7 +402,7 @@ export class Purchase {
   async cancel(): Promise<void> {
     const e = await this.entry();
     if (!e) return;
-    const s = await this.ctx.relay.session(e.session).catch(() => null);
+    const s = await this.ctx.relay.session(e.session, e.token).catch(() => null);
     if (s?.chain?.funding_txid) throw new Error('funding was broadcast: wait for the settlement or use refund()');
     await this.ctx.box.put((x) => {
       for (const n of x.wallet?.notes || []) if (n.reserved === e.session) delete n.reserved;

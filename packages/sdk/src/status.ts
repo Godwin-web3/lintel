@@ -42,6 +42,15 @@ export function listingStatus(listing: AnyListing, session: Session | null): Lis
   const t = txids(session);
   const done = (phase: ListingPhase): ListingStatus => ({ phase, status: listing.status, mode: session?.mode ?? null, txids: t, label: LABEL[phase] });
   if (!session) return done('open');
+  if (session.redacted) {
+    // status view (no token): stage flags and public txids only
+    const st = session.stage || { partial: false, presig: false, signature: false };
+    if (session.chain?.settle_txid || st.signature) return done('settled');
+    if (st.presig) return done('presigned');
+    if (session.mode === 'chain' && st.partial) return done('settlement_built');
+    if (session.chain?.funding_txid) return done('funding_broadcast');
+    return done('joined');
+  }
   if (session.mode === 'relay') {
     if (session.signature) return done('settled');
     if (session.presig) return done('presigned');

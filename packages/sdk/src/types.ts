@@ -88,6 +88,14 @@ export interface Session {
   presig: string | null;
   signature: Hex | null;
   chain?: ChainFields;
+  /**
+   * Set when the relay served the status view (no buyer or seller token):
+   * only id, listing_id, created_at, mode, `stage` and the public funding /
+   * settlement txids are present.
+   */
+  redacted?: true;
+  /** Status view only: which signing steps have happened. */
+  stage?: { partial: boolean; presig: boolean; signature: boolean };
 }
 
 export interface ListingDetail {
