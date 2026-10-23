@@ -4,6 +4,18 @@ This walks through a sale on Zcash testnet using only the web app. You need two 
 
 > Testnet only. TAZ has no value. Everything below happens on Zcash testnet.
 
+## In two minutes
+
+No wallet and no coins needed. You seal a small secret, then check its proof the way a buyer would.
+
+1. Open the app: <https://lintel-godwin-web3s-projects.vercel.app/app>. Wait for **Prover ready** in the header (usually about 10 seconds).
+2. Open **Sell**, type a title and a price, paste a line of text as the secret, and choose **Seal and list**. A small secret seals in roughly 15 to 30 seconds on a laptop.
+3. Copy the listing ID from the listing's address (`/app#/listing/<id>`) and paste it into **Verify** at <https://lintel-godwin-web3s-projects.vercel.app/verify>. Your browser downloads the listing and checks its Halo 2 proof; you get a plain-English result, the part count and the content hash. Anyone can do this for any listing, with no wallet.
+
+That is the half of Lintel a buyer relies on before paying. A full on-chain sale takes longer, because funding and settlement each wait for a testnet block (about 75 seconds): a recorded run took 6 minutes 34 seconds end to end. The rest of this page walks through it.
+
+## Full sale on testnet
+
 Open the app: <https://lintel-godwin-web3s-projects.vercel.app/app>. The first load downloads the prover (WebAssembly plus a 512 KB parameter file; a second 2 MB file is fetched only when a big listing is first sealed or verified); the header shows **Prover ready** when it is done, usually in about 10 seconds.
 
 ## 1. Get testnet coins (buyer)

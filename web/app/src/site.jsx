@@ -11,9 +11,13 @@ export const PUBLIC_RELAY = 'https://lintel-relay.onrender.com';
 export const PAGES = [
   ['/how-it-works', 'How it works'],
   ['/use-cases', 'Use cases'],
+  ['/verify', 'Verify'],
   ['/evidence', 'Evidence'],
   ['/docs', 'Docs'],
 ];
+
+/** Public issue tracker; testers report here. Security issues go to SECURITY.md instead. */
+export const ISSUES = `${GITHUB}/issues`;
 
 // Sections that used to live on the landing page (/#how …) and now have their own page.
 const MOVED = { how: '/how-it-works', name: '/how-it-works#name', guarantees: '/how-it-works#guarantees', stack: '/how-it-works#stack', uses: '/use-cases', evidence: '/evidence' };
@@ -114,33 +118,42 @@ export function SiteFooter() {
       <div className="wrap">
         <div>
           <Lockup height={32} />
-          <p className="fine">Pay only for what’s proven. Testnet software: it runs on Zcash testnet (TAZ) and has not been audited. Do not use it with real funds.</p>
+          <p className="fine">Pay only for what’s proven. Testnet software: it runs on Zcash testnet (TAZ, no real value) and has not been audited. Do not use it with real funds.</p>
+          <p className="fine legal">
+            <Link to="/terms">Terms</Link> · <Link to="/privacy">Privacy</Link> · <Link to="/disclosures">Risk disclosures</Link>
+          </p>
         </div>
         <div>
           <h4>Product</h4>
           <ul>
-            <li><a href="/app">Marketplace</a></li>
+            <li><a href="/app">Open the app</a></li>
             <li><a href="/app#/sell">Sell</a></li>
-            <li><a href="/app#/wallet">Testnet wallet</a></li>
+            <li><Link to="/verify">Verify a listing</Link></li>
             <li><Link to="/how-it-works">How it works</Link></li>
             <li><Link to="/use-cases">Use cases</Link></li>
             <li><Link to="/evidence">Testnet evidence</Link></li>
+            <li><Link to="/testers">Become a tester</Link></li>
           </ul>
         </div>
         <div>
-          <h4>Docs</h4>
+          <h4>Developers</h4>
           <ul>
+            <li><Link to="/docs">Docs</Link></li>
             <li><Link to="/docs/quickstart">Quickstart</Link></li>
-            <li><Link to="/docs/how-it-works">Protocol</Link></li>
-            <li><Link to="/docs/security-model">Security model</Link></li>
+            <li><Link to="/whitepaper">Whitepaper</Link></li>
+            <li><Link to="/docs/compare">How Lintel compares</Link></li>
+            <li><Link to="/docs/threat-model">Threat model</Link></li>
             <li><Link to="/docs/self-hosting">Self-hosting</Link></li>
-            <li><Link to="/docs/cli">CLI and seller agent</Link></li>
+            <li><a href={GITHUB} rel="noreferrer">GitHub</a></li>
           </ul>
         </div>
         <div>
-          <h4>Project</h4>
+          <h4>Company</h4>
           <ul>
-            <li><a href={GITHUB} rel="noreferrer">GitHub</a></li>
+            <li><Link to="/blog">Blog</Link></li>
+            <li><Link to="/pitch">Pitch</Link></li>
+            <li><Link to="/docs/what-ships-when">What ships when</Link></li>
+            <li><Link to="/docs/production">Production gate</Link></li>
             <li><a href={`${GITHUB}/blob/main/SECURITY.md`} rel="noreferrer">Report a vulnerability</a></li>
             <li><a href={`${GITHUB}/blob/main/CHANGELOG.md`} rel="noreferrer">Changelog</a></li>
           </ul>

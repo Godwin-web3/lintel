@@ -24,17 +24,20 @@ Proving, signing, transaction building and verification all run in the browser (
 
 ## Where to go next
 
-- [Quickstart](quickstart.md): buy and sell on testnet in the browser.
+- [Quickstart](quickstart.md): check a proof in two minutes, then buy and sell on testnet in the browser.
+- [What ships when](what-ships-when.md): what works on testnet today and what does not exist yet.
 - [How it works](how-it-works.md): adaptor signatures, sealed goods, settlement and the time-locked refund.
 - [Security model](security-model.md): what each party and the relay can see and do, and the known limits.
+- [Threat model](threat-model.md): attacker by attacker, with mitigations and residual risk.
+- [How Lintel compares](compare.md): trusted escrow, ZKCP on Bitcoin, plain Zcash trades, FHE/MPC data markets and shielded pools.
 - [Architecture](architecture.md): engine, WASM, relay and app, and what never leaves your device.
 - [Self-hosting](self-hosting.md): run your own relay (Render + Upstash) and app (Vercel).
 - [CLI reference](cli.md): `lintel-cli`, `lintel-chain` and the seller agent `lintel-agent`.
 - [FAQ](faq.md) and [Testnet evidence](testnet-evidence.md).
 
-Deep dives: [On-chain settlement](onchain.md) (full design notes and test record, including the seller agent and paying from another wallet), [Presale, relay and proving](relay-perf.md) and [Big payloads](big-payloads.md) (offer v3: proven 23.8 KB parts, rate-2 keystream, content-addressed blobs, benchmarks). History: the [early design note](settlement.md) from the first CLI prototype.
+Deep dives: [On-chain settlement](onchain.md) (full design notes and test record, including the seller agent and paying from another wallet), [Presale, relay and proving](relay-perf.md) and [Big payloads](big-payloads.md) (offer v3: proven 23.8 KB parts, rate-2 keystream, content-addressed blobs, benchmarks). Deeper: the [Whitepaper](whitepaper.md) (construction, circuits, security argument, benchmarks) and the [Production gate](production.md) (what must be true before any mainnet). History: the [early design note](settlement.md) from the first CLI prototype.
 
-On the site: [How it works](https://lintel-godwin-web3s-projects.vercel.app/how-it-works), [Use cases](https://lintel-godwin-web3s-projects.vercel.app/use-cases) and [Evidence](https://lintel-godwin-web3s-projects.vercel.app/evidence).
+On the site: [Verify a listing](https://lintel-godwin-web3s-projects.vercel.app/verify), [How it works](https://lintel-godwin-web3s-projects.vercel.app/how-it-works), [Use cases](https://lintel-godwin-web3s-projects.vercel.app/use-cases), [Evidence](https://lintel-godwin-web3s-projects.vercel.app/evidence), [Become a tester](https://lintel-godwin-web3s-projects.vercel.app/testers) and the [Blog](https://lintel-godwin-web3s-projects.vercel.app/blog).
 
 ## Live deployment
 
