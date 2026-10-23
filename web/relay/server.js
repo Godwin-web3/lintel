@@ -77,7 +77,7 @@ const isHex = (v, len) => typeof v === 'string' && HEX.test(v) && (len ? v.lengt
 const str = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
 const jsonStr = (v, max) => { if (typeof v !== 'string' || v.length > max) return false; try { JSON.parse(v); return true; } catch { return false; } };
 class Bad extends Error { constructor(m, code = 400) { super(m); this.code = code; } }
-const need = (cond, msg) => { if (!cond) throw new Bad(msg); };
+const need = (cond, msg, code = 400) => { if (!cond) throw new Bad(msg, code); };
 
 // Offer v3 manifest: shape checks here, and every blob it names must already
 // be uploaded. The proofs themselves are checked by the buyer's app.
@@ -315,6 +315,23 @@ const routes = [
     const l = db.listings[lid]; if (!l) throw new Bad('not found', 404);
     if (l.version === 2) return { listing: publicListing(l), session: null };
     return { listing: publicListing(l), session: l.session_id ? sessionFor(db.sessions[l.session_id], auth) : null };
+  }],
+
+  // The seller withdraws a listing. Refused once a buyer has committed (a
+  // pre-signature, a funded escrow, or an ordered copy), so no buyer's money
+  // or half-done sale is ever orphaned.
+  ['DELETE', /^\/listings\/([\w-]+)$/, ([lid], _, auth) => {
+    const l = db.listings[lid]; if (!l) throw new Bad('not found', 404);
+    if (!tokOk(auth, l.seller_token_hash)) throw new Bad('seller token required', 401);
+    if (l.version === 2) {
+      need(!l.units.some((u) => u.order_id), 'a buyer has ordered a copy; the listing cannot be withdrawn', 409);
+    } else if (l.session_id) {
+      const ss = db.sessions[l.session_id];
+      need(!ss || (!ss.presig && !ss.signature && !ss.chain?.funding_txid), 'a buyer has committed to this sale; the listing cannot be withdrawn', 409);
+      if (ss) { delete db.sessions[l.session_id]; touch(['sessions', l.session_id]); }
+    }
+    delete db.listings[lid]; touch(['listings', lid]);
+    return { deleted: lid };
   }],
 
   // A listing sells once: its adaptor secret is public after the first
@@ -555,7 +572,7 @@ function cors(req, res) {
   const allow = ORIGINS.includes('*') ? '*' : (ORIGINS.includes(origin) ? origin : ORIGINS[0]);
   res.setHeader('Access-Control-Allow-Origin', allow);
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   // The app is cross-origin isolated (COOP/COEP) for threaded proving; CORS
   // already makes these responses loadable, CORP states it explicitly.

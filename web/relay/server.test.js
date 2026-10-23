@@ -118,6 +118,29 @@ test('session privacy: settlement partial must be masked; reads redacted without
   }
 });
 
+test('seller withdraws a listing; refused once a buyer has committed', async () => {
+  const listing = { title: 'Gone', price_zec: '0.1', content_hash: h32('a'), merchant_vk: h32('b'), t_point: h32('c'), offer: '{"x":1}', size: 1 };
+  const a = await call('POST', '/listings', listing);
+  const lid = a.json.listing.id, st = a.json.seller_token;
+  assert.equal((await call('DELETE', `/listings/${lid}`)).status, 401);
+  assert.equal((await call('DELETE', `/listings/${lid}`, null, 'nope')).status, 401);
+  const s = await call('POST', `/listings/${lid}/sessions`, { payer_vk: h32('d'), r_a: h32('e'), alpha: h32('f'), sighash: h32('1') });
+  const sid = s.json.session.id;
+  const d = await call('DELETE', `/listings/${lid}`, null, st);
+  assert.equal(d.status, 200);
+  assert.equal((await call('GET', `/listings/${lid}`)).status, 404);
+  assert.equal((await call('GET', `/sessions/${sid}`)).status, 404);
+
+  const b = await call('POST', '/listings', listing);
+  const lid2 = b.json.listing.id, st2 = b.json.seller_token;
+  const s2 = await call('POST', `/listings/${lid2}/sessions`, { payer_vk: h32('d'), r_a: h32('e'), alpha: h32('f'), sighash: h32('1') });
+  const sid2 = s2.json.session.id, bt2 = s2.json.buyer_token;
+  assert.equal((await call('POST', `/sessions/${sid2}/partial`, { partial: masked(h32('c')), merchant_pok: '{}' }, st2)).status, 200);
+  const pre = await call('POST', `/sessions/${sid2}/presig`, { presig: '{}' }, bt2);
+  assert.equal(pre.status, 200);
+  assert.equal((await call('DELETE', `/listings/${lid2}`, null, st2)).status, 409);
+});
+
 test('decodes a lightwalletd RawTransaction', async () => {
   const { decodeRawTransaction } = await import('./server.js');
   // field 1 (bytes) = 0xdeadbeef, field 2 (varint) = 4521277

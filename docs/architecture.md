@@ -43,6 +43,7 @@ flowchart LR
 | --- | --- | --- |
 | GET | `/health` | Liveness |
 | GET, POST | `/listings`, `/listings/:id` | List, create and read listings |
+| DELETE | `/listings/:id` | Seller withdraws a listing (seller token); refused once a buyer has pre-signed, funded or ordered |
 | POST | `/listings/:id/sessions` | Open a purchase session |
 | GET | `/sessions/:id` | Read session fields |
 | POST | `/sessions/:id/{partial,presig,signature,chain/:field}` | Write-once session fields |
