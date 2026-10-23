@@ -59,7 +59,7 @@ A browser sale with both sides in the web app took 6 minutes 34 seconds end to e
 | Mainnet | Not planned until testnet is solid and reviewed; see the [Production gate](docs/production.md) |
 | External audit | Not done |
 | On-chain settlement for multi-copy listings | Not done: they settle through the relay and move no coins |
-| Confidentiality after a sale | Not provided: after a single-copy sale settles, anyone who reads the sale's public session record and the mined settlement can compute the key ([threat model](docs/threat-model.md#after-the-sale)) |
+| Exclusivity after a sale | Not enforceable: outsiders can no longer compute the key (the seller's partial signature is masked to the buyer), but the buyer can still share what it bought, and sales settled before the fix are exposed ([threat model](docs/threat-model.md#after-the-sale)) |
 | Refund backup | Not done: the signed refund lives only in the buyer's browser storage |
 | Hosted seller agent | Not offered: the agent holds the listing's secrets, so it runs on the seller's machine |
 | Full wallet | Not done: the device wallet only knows notes scanned in by txid |
@@ -81,6 +81,7 @@ sequenceDiagram
   B->>B: verify proofs locally
   S-->>B: co-signed time-locked refund (via relay)
   B->>Z: fund joint escrow (device wallet or ZIP 321 pay-in)
+  S-->>B: partial signature, s_b masked to the buyer
   B-->>S: adaptor pre-signature locked to T
   S->>Z: settlement with completed signature
   B->>Z: read signature, t = s − s_a − s_b, decrypt

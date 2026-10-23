@@ -45,7 +45,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::chain::{self, JointKeyInfo, NoteRecord, SigningInfo, SpendTerms};
-use crate::protocol::{self, BuyerPartial, KnowledgeProof, PreSignature};
+use crate::protocol::{self, BuyerPartial, KnowledgeProof, PreSignature, WirePartial};
 use crate::sealed;
 
 /// Same constants as `web/app/src/onchain.js`.
@@ -65,8 +65,6 @@ fn sc(h: &str, what: &str) -> Result<Scalar> { protocol::parse_scalar(h).ok_or_e
 pub struct MerchantState { pub sk_b: String, pub secret: String, #[serde(default)] pub negated: bool }
 #[derive(Serialize, Deserialize)]
 struct PokWire { r_point: String, s: String }
-#[derive(Serialize, Deserialize)]
-struct PartialWire { r_b: String, s_b: String, t_point: String }
 
 fn pok_to(p: &KnowledgeProof) -> String {
     serde_json::to_string(&PokWire { r_point: pt_hex(&p.r_point), s: sc_hex(&p.s) }).unwrap()
@@ -75,12 +73,14 @@ pub fn pok_from(j: &str) -> Result<KnowledgeProof> {
     let w: PokWire = serde_json::from_str(j).context("invalid proof json")?;
     Ok(KnowledgeProof { r_point: pt(&w.r_point, "proof point")?, s: sc(&w.s, "proof scalar")? })
 }
-fn partial_to(p: &BuyerPartial) -> String {
-    serde_json::to_string(&PartialWire { r_b: pt_hex(&p.r_b), s_b: sc_hex(&p.s_b), t_point: pt_hex(&p.t_point) }).unwrap()
-}
+/// Parses a partial whose `s_b` is in the clear (v1: the refund partial).
+/// A masked (v2) settlement partial is refused here: open it with the key
+/// share it is masked to (`protocol::Seller::open_partial` for the payer).
 pub fn partial_from(j: &str) -> Result<BuyerPartial> {
-    let w: PartialWire = serde_json::from_str(j).context("invalid partial json")?;
-    Ok(BuyerPartial { r_b: pt(&w.r_b, "R_b")?, s_b: sc(&w.s_b, "s_b")?, t_point: pt(&w.t_point, "T")? })
+    match WirePartial::parse(j).map_err(|e| anyhow!(e))? {
+        WirePartial::Plain(p) => Ok(p),
+        WirePartial::Masked { .. } => bail!("masked partial: only the payer or the merchant can open it"),
+    }
 }
 
 // ---------------------------------------------------------------- merchant (port of the wasm `Merchant`)
@@ -121,18 +121,27 @@ impl Merchant {
     /// `{partial, pok}` for the refund (adaptor secret zero).
     pub fn refund_partial(&self, r_a: &str, payer_vk: &str, alpha: &str, sighash: &[u8], session: &[u8]) -> Result<(String, String)> {
         let p = self.inner.refund_partial(pt(r_a, "nonce")?, self.peer(payer_vk)?, sc(alpha, "alpha")?, sighash);
-        Ok((partial_to(&p), self.prove_knowledge(payer_vk, session)?))
+        // T is the identity here, so s_b in the clear reveals nothing.
+        Ok((protocol::partial_to_plain_json(&p), self.prove_knowledge(payer_vk, session)?))
     }
-    /// `{partial, pok}` for the settlement (locked to T).
+    /// `{partial, pok}` for the settlement (locked to T). The partial is the
+    /// masked v2 wire format: `s_b` is readable only by the payer (and this
+    /// merchant), so the relay record plus the mined `s` do not give `t`.
     pub fn respond(&self, r_a: &str, payer_vk: &str, alpha: &str, sighash: &[u8], session: &[u8]) -> Result<(String, String)> {
-        let p = self.inner.partial(pt(r_a, "nonce")?, self.peer(payer_vk)?, sc(alpha, "alpha")?, sighash);
-        Ok((partial_to(&p), self.prove_knowledge(payer_vk, session)?))
+        let vk_a = self.peer(payer_vk)?;
+        let p = self.inner.partial(pt(r_a, "nonce")?, vk_a, sc(alpha, "alpha")?, sighash);
+        let wire = self.inner.masked_partial_json(&p, vk_a).map_err(|e| anyhow!(e))?;
+        Ok((wire, self.prove_knowledge(payer_vk, session)?))
     }
     /// Verifies the buyer's pre-signature, completes it, verifies the result.
     /// The returned signature reveals `t` once published.
     pub fn complete(&self, presig: &str, r_a: &str, partial: &str, payer_vk: &str, alpha: &str) -> Result<[u8; 64]> {
         let pre: PreSignature = serde_json::from_str(presig).context("invalid pre-signature json")?;
-        let part = partial_from(partial)?;
+        if let WirePartial::Masked { vk_a, .. } = WirePartial::parse(partial).map_err(|e| anyhow!(e))? {
+            let p = self.peer(payer_vk)?;
+            ensure!(vk_a == p || vk_a == -p, "partial is masked to a different payer key");
+        }
+        let part = self.inner.open_partial(partial).map_err(|e| anyhow!(e))?;
         ensure!(
             self.inner.verify_presig(&pre, pt(r_a, "nonce")?, part.r_b, self.peer(payer_vk)?, sc(alpha, "alpha")?),
             "buyer pre-signature is invalid"

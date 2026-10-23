@@ -21,7 +21,7 @@ What has to be true before Lintel handles real money on Zcash mainnet. Today non
 ### 1. Testnet is solid
 
 - Every on-chain flow (sale, refund, pay from another wallet, seller agent) has a recent mined run on the current code, recorded in `docs/testnet/*.json`.
-- Known gaps that can lose funds or leak secrets are closed or explicitly accepted with a reason: refund kept only in browser storage, the post-sale confidentiality limit described in the [Threat model](threat-model.md#after-the-sale), the relay's view of escrows.
+- Known gaps that can lose funds or leak secrets are closed or explicitly accepted with a reason: refund kept only in browser storage, the relay's view of escrows. The post-sale key leak (seller's partial signature on a public record) is closed for new sales by masking it to the buyer; see the [Threat model](threat-model.md#after-the-sale) for what remains.
 - Multi-copy listings either settle on chain or are clearly labelled as off-chain only, as they are today.
 - Tester reports that touch funds or secrets are fixed and released.
 

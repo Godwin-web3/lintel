@@ -8,7 +8,7 @@ Lintel solves one problem: selling a piece of data to someone you do not trust, 
 
 | Approach | Who must be trusted | Buyer checks the goods before paying | Payment privacy | Content after the sale |
 | --- | --- | --- | --- | --- |
-| **Lintel** | Nobody holds keys or funds. The relay can stall a sale and sees escrow balances; the app host serves the code | Yes: Halo 2 proof that the ciphertext opens under the payment's key to content with hash `h`, plus any public claims the seller proved about it (length bounds, magic prefix, bytes at an offset), checked on the buyer's device | Shielded escrow note on Zcash; a small transparent lock coin is visible | Computable by anyone who reads the relay's session record and the mined settlement ([threat model](threat-model.md#after-the-sale)) |
+| **Lintel** | Nobody holds keys or funds. The relay can stall a sale and sees escrow balances; the app host serves the code | Yes: Halo 2 proof that the ciphertext opens under the payment's key to content with hash `h`, plus any public claims the seller proved about it (length bounds, magic prefix, bytes at an offset), checked on the buyer's device | Shielded escrow note on Zcash; a small transparent lock coin is visible | Known to the buyer and seller only; the seller's partial signature is masked to the buyer, so the relay and the chain do not give the key ([threat model](threat-model.md#after-the-sale)) |
 | **Trusted escrow or marketplace** | The escrow agent holds the funds, usually the goods, and decides disputes | Only if the agent inspects them | Whatever the payment rail offers; the agent sees everything | Held by the agent and the buyer |
 | **ZKCP on Bitcoin** (hash-locked payment plus a zero-knowledge proof) | Nobody, if the proof system's parameters are honest | Yes: the seller proves the ciphertext decrypts, under a key whose hash locks the payment, to a valid answer | Transparent Bitcoin script; the hash lock is visible on chain | The key is published in the redeeming transaction, so anyone with the ciphertext can decrypt |
 | **Plain Zcash trade** (pay, then hope; or send the file, then hope) | The side that goes second trusts the side that goes first | No | Fully shielded payment | Only the buyer, if the seller delivers |
@@ -31,7 +31,7 @@ Where Lintel differs:
 - **No hash lock on chain.** The key is carried by an adaptor signature: the escrow spend is an ordinary-looking RedPallas signature, and the key is the difference between the completed signature and the two halves the parties exchanged. Nothing on chain marks the transaction as a contingent payment.
 - **Shielded funds.** The escrow is a shielded note, so amounts and parties are not public.
 - **Narrower conditions.** ZKCP can, in principle, prove any condition the buyer specifies. Lintel proves the content hash plus a fixed set of format claims (length bounds, magic prefix, bytes at an offset; see [Proven claims](predicates.md)); richer conditions such as signed attestations or dataset properties are designed but not built.
-- **Same limit after the sale.** Like ZKCP, the released key opens the ciphertext for whoever can compute it.
+- **The key is not public after the sale.** ZKCP's redeeming transaction publishes `K` itself. Lintel's settlement publishes a signature that gives `t` only together with the seller's partial signature `s_b`, which is masked to the buyer, so only buyer and seller learn the key. Either can still share it.
 
 ### Plain Zcash trades
 
@@ -48,6 +48,6 @@ Shielded pools hide who paid whom and how much. They are payment systems, not ex
 ## When not to use Lintel
 
 - When you need someone to judge quality or settle a dispute: use a trusted escrow.
-- When the content must stay secret from everyone but the buyer after the sale: Lintel does not provide that today.
+- When the content must stay secret from everyone but the buyer after the sale *even if the buyer leaks it*: no exchange protocol can promise that. Lintel keeps the key between buyer and seller; it cannot stop either from sharing it.
 - When the content is larger than 1,523,681 bytes: sell a key to a file hosted elsewhere, and the proof then covers the key, not the file.
 - When real money is involved: Lintel is testnet software. See [What ships when](what-ships-when.md) and the [Production gate](production.md).

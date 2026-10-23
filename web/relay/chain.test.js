@@ -113,7 +113,8 @@ test('chain-mode session: no nonce up front, settlement round gated, no relay si
   assert.equal((await call('POST', `/sessions/${sid}/chain/settle_pczt`, { value: 'AAAA' }, st)).status, 200);
   assert.equal((await call('POST', `/sessions/${sid}/chain/settle_r_a`, { value: h32('e') }, st)).status, 401);
   assert.equal((await call('POST', `/sessions/${sid}/chain/settle_r_a`, { value: h32('e') }, bt)).status, 200);
-  assert.equal((await call('POST', `/sessions/${sid}/partial`, { partial: '{}', merchant_pok: '{}' }, st)).status, 200);
+  const masked = JSON.stringify({ v: 2, r_b: h32('7'), enc_sb: h32('8'), t_point: h32('c'), vk_a: h32('d'), vk_b: h32('b') });
+  assert.equal((await call('POST', `/sessions/${sid}/partial`, { partial: masked, merchant_pok: '{}' }, st)).status, 200);
   assert.equal((await call('POST', `/sessions/${sid}/presig`, { presig: '{}' }, bt)).status, 200);
   assert.equal((await call('POST', `/sessions/${sid}/signature`, { signature: h32('9').repeat(2) }, st)).status, 400, 'on-chain: t must come from the chain');
   assert.equal((await call('POST', `/sessions/${sid}/chain/settle_txid`, { value: h32('6') }, st)).status, 200);

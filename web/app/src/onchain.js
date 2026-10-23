@@ -277,7 +277,7 @@ export async function advanceBuyer(listing, verifiedT) {
   const entry = store.get().buying[lid];
   const c = entry.chain, sid = entry.session, tok = entry.token;
   await crypto('payerImport', { key: sid, state: c.payerState });
-  let { session: s } = await relay('GET', `/sessions/${sid}`);
+  let { session: s } = await relay('GET', `/sessions/${sid}`, undefined, tok);
   const ch = s.chain || {};
   const post = (field, value) => relay('POST', `/sessions/${sid}/chain/${field}`, { value }, tok).then((r) => { s = r.session; });
 

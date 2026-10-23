@@ -241,6 +241,142 @@ impl Buyer {
     }
 }
 
+// ---------------------------------------------------------------- masked partials
+//
+// The completed signature is `s = s_a + s_b + t`. The settlement makes `s`
+// public and the relay stores the pre-signature `s_a`, so a partial whose `s_b`
+// sits on the relay in the clear would let anyone compute `t` (and decrypt the
+// public ciphertext) once the sale settles. The settlement partial is therefore
+// published with `s_b` masked to the payer, the same idea as presale's
+// `enc_sb`: `enc_sb = s_b + H(DH, R_b, T)` with `DH = sk_b * vk_a = sk_a * vk_b`.
+// Only the two signing-share holders can compute `DH`, so only they can unmask
+// `s_b`; the relay and anyone reading the chain see `s`, `s_a` and `enc_sb`,
+// which do not determine `t`.
+//
+// `DH` is hashed in a negation-invariant form: either party may have negated
+// its share to give the joint key ỹ = 0 (see `joint_ak`), and `[-x]P = -[x]P`.
+// `R_b` is a fresh nonce per partial, so a pad is never reused.
+
+/// Version of the masked settlement-partial wire format.
+pub const PARTIAL_MASKED_V: u32 = 2;
+
+fn canonical(p: &Point) -> [u8; 32] {
+    let b = p.to_bytes();
+    if b[31] & 0x80 != 0 { (-*p).to_bytes() } else { b }
+}
+
+fn sb_pad(dh: &Point, r_b: &Point, t_point: &Point) -> Option<Scalar> {
+    // An identity DH point (an identity key share) would make the pad public.
+    if bool::from(group::Group::is_identity(dh)) { return None; }
+    let h = Params::new().hash_length(64).personal(b"Lintel_sbmask_v1")
+        .to_state().update(&canonical(dh)).update(&r_b.to_bytes()).update(&t_point.to_bytes()).finalize();
+    let arr: [u8; 64] = h.as_bytes().try_into().unwrap();
+    Some(<Scalar as FromUniformBytes<64>>::from_uniform_bytes(&arr))
+}
+
+/// Partial signature wire format (JSON). v1 (no `v`): `{r_b, s_b, t_point}`,
+/// `s_b` in the clear; used for the refund partial (`T` = identity, so `s_b`
+/// reveals nothing) and accepted from old clients. v2: `{v: 2, r_b, enc_sb,
+/// t_point, vk_a, vk_b}`, `s_b` masked to the payer; every settlement partial.
+/// `vk_a`/`vk_b` are the two public key shares the pad was computed with (as
+/// the merchant saw them), so either party can unmask with its own secret.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PartialWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub v: Option<u32>,
+    pub r_b: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub s_b: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub enc_sb: Option<String>,
+    pub t_point: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub vk_a: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub vk_b: Option<String>,
+}
+
+/// A parsed partial: in the clear (v1) or masked (v2).
+#[derive(Clone, Debug)]
+pub enum WirePartial {
+    Plain(BuyerPartial),
+    Masked { r_b: Point, enc_sb: Scalar, t_point: Point, vk_a: Point, vk_b: Point },
+}
+
+impl WirePartial {
+    pub fn parse(j: &str) -> Result<Self, &'static str> {
+        let w: PartialWire = serde_json::from_str(j).map_err(|_| "invalid partial json")?;
+        let r_b = parse_point(&w.r_b).ok_or("invalid R_b")?;
+        let t_point = parse_point(&w.t_point).ok_or("invalid T")?;
+        match w.v {
+            None | Some(1) => {
+                let s_b = parse_scalar(w.s_b.as_deref().ok_or("partial has no s_b")?).ok_or("invalid s_b")?;
+                Ok(WirePartial::Plain(BuyerPartial { r_b, s_b, t_point }))
+            }
+            Some(PARTIAL_MASKED_V) => {
+                if w.s_b.is_some() { return Err("masked partial must not carry s_b in the clear"); }
+                let enc_sb = parse_scalar(w.enc_sb.as_deref().ok_or("partial has no enc_sb")?).ok_or("invalid enc_sb")?;
+                let vk_a = parse_point(w.vk_a.as_deref().ok_or("partial has no vk_a")?).ok_or("invalid vk_a")?;
+                let vk_b = parse_point(w.vk_b.as_deref().ok_or("partial has no vk_b")?).ok_or("invalid vk_b")?;
+                Ok(WirePartial::Masked { r_b, enc_sb, t_point, vk_a, vk_b })
+            }
+            Some(_) => Err("unsupported partial version"),
+        }
+    }
+    pub fn r_b(&self) -> Point { match self { WirePartial::Plain(p) => p.r_b, WirePartial::Masked { r_b, .. } => *r_b } }
+    pub fn t_point(&self) -> Point { match self { WirePartial::Plain(p) => p.t_point, WirePartial::Masked { t_point, .. } => *t_point } }
+    pub fn is_masked(&self) -> bool { matches!(self, WirePartial::Masked { .. }) }
+}
+
+/// v1 wire JSON with `s_b` in the clear. Only for the refund partial.
+pub fn partial_to_plain_json(p: &BuyerPartial) -> String {
+    serde_json::to_string(&PartialWire {
+        r_b: hex::encode(p.r_b.to_bytes()), s_b: Some(hex::encode(p.s_b.to_repr())), t_point: hex::encode(p.t_point.to_bytes()), ..Default::default()
+    }).unwrap()
+}
+
+impl Buyer {
+    /// v2 wire JSON: `s_b` masked to the payer whose key share is `vk_a`
+    /// (pass the key as used for signing, i.e. after any negation).
+    pub fn masked_partial_json(&self, p: &BuyerPartial, vk_a: Point) -> Result<String, &'static str> {
+        let pad = sb_pad(&(vk_a * self.sk_b), &p.r_b, &p.t_point).ok_or("payer key is the identity")?;
+        Ok(serde_json::to_string(&PartialWire {
+            v: Some(PARTIAL_MASKED_V),
+            r_b: hex::encode(p.r_b.to_bytes()),
+            s_b: None,
+            enc_sb: Some(hex::encode((p.s_b + pad).to_repr())),
+            t_point: hex::encode(p.t_point.to_bytes()),
+            vk_a: Some(hex::encode(vk_a.to_bytes())),
+            vk_b: Some(hex::encode(self.vk_b.to_bytes())),
+        }).unwrap())
+    }
+    /// The merchant's own view of a partial it published (unmasks v2 with
+    /// `sk_b`). Checks the result against `R_b`, `vk_b` and `T` is left to
+    /// the signature checks that follow; this only decodes.
+    pub fn open_partial(&self, j: &str) -> Result<BuyerPartial, &'static str> {
+        match WirePartial::parse(j)? {
+            WirePartial::Plain(p) => Ok(p),
+            WirePartial::Masked { r_b, enc_sb, t_point, vk_a, .. } => {
+                let pad = sb_pad(&(vk_a * self.sk_b), &r_b, &t_point).ok_or("payer key is the identity")?;
+                Ok(BuyerPartial { r_b, s_b: enc_sb - pad, t_point })
+            }
+        }
+    }
+}
+
+impl Seller {
+    /// The payer's view of a partial: unmasks v2 with `sk_a`. `merchant_vk`
+    /// is the merchant key the payer trusts (after any negation); when given
+    /// it is used for the pad instead of the `vk_b` the wire carries. A
+    /// partial unmasked with the wrong key fails `pre_sign`'s check
+    /// `s_b * G == R_b + c * vk_b`, so a tampered wire cannot slip through.
+    pub fn open_partial(&self, j: &str, merchant_vk: Option<Point>) -> Result<BuyerPartial, &'static str> {
+        match WirePartial::parse(j)? {
+            WirePartial::Plain(p) => Ok(p),
+            WirePartial::Masked { r_b, enc_sb, t_point, vk_b, .. } => {
+                let vk = merchant_vk.unwrap_or(vk_b);
+                let pad = sb_pad(&(vk * self.sk_a), &r_b, &t_point).ok_or("merchant key is the identity")?;
+                Ok(BuyerPartial { r_b, s_b: enc_sb - pad, t_point })
+            }
+        }
+    }
+}
+
 /// Finds the completed signature `(R, s)` inside serialized transaction bytes
 /// by locating the 32-byte nonce commitment `R`, which both parties know in
 /// advance (`pre.r_hex`), and checks it verifies under `rk_hex`/`sighash_hex`.
@@ -373,4 +509,80 @@ mod tests {
         assert!(parse_scalar(&"ff".repeat(32)).is_none());
         assert!(parse_point("00").is_none());
     }
+
+    /// Runs a settlement with the masked (v2) partial, as the relay sees it.
+    /// Returns (relay view: partial json, presig, sig) and the merchant's t.
+    fn masked_sale(negate: bool) -> (String, PreSignature, [u8; 64], Scalar, Seller, Point) {
+        let mut seller = Seller::new();
+        let mut buyer = Buyer::new();
+        if negate { seller.negate_share(); buyer.negate_share(); }
+        let (alpha, sighash, session) = (Scalar::from(13u64), b"settle".as_slice(), b"sess-m".as_slice());
+        let r_a = seller.new_nonce();
+        let p = buyer.partial(r_a, seller.vk_a, alpha, sighash);
+        let wire = buyer.masked_partial_json(&p, seller.vk_a).unwrap();
+        assert!(!wire.contains(&hex::encode(p.s_b.to_repr())), "s_b must not appear on the wire");
+        let pok = buyer.prove_knowledge(seller.vk_a, session);
+        let opened = seller.open_partial(&wire, Some(buyer.vk_b)).unwrap();
+        assert_eq!(opened.s_b, p.s_b);
+        let pre = seller.pre_sign(buyer.vk_b, &opened, sighash, session, &pok, alpha).unwrap();
+        // the merchant (or lintel-agent) completes from the relay's copy alone
+        let mine = buyer.open_partial(&wire).unwrap();
+        assert!(buyer.verify_presig(&pre, r_a, mine.r_b, seller.vk_a, alpha));
+        let sig = buyer.complete(&pre, &mine).unwrap();
+        assert!(buyer.verify_completed(&pre, &sig));
+        let vk_b = buyer.vk_b;
+        (wire, pre, sig, buyer.t, seller, vk_b)
+    }
+
+    #[test]
+    fn masked_partial_buyer_extracts_t_outsider_cannot() {
+        for negate in [false, true] {
+            let (wire, pre, sig, t, seller, vk_b) = masked_sale(negate);
+            let s = Scalar::from_repr(sig[32..].try_into().unwrap()).unwrap();
+            let s_a = parse_scalar(&pre.s_a_hex).unwrap();
+            // buyer: unmask with its own share (from the relay copy, no merchant key needed)
+            let p = seller.open_partial(&wire, None).unwrap();
+            assert_eq!(extract_t(s, s_a, p.s_b), t);
+            assert_eq!(seller.open_partial(&wire, Some(vk_b)).unwrap().s_b, p.s_b);
+            // outside observer: relay record (partial, presig, signature) + mined s.
+            let WirePartial::Masked { enc_sb, r_b, t_point, vk_a, vk_b: wvk_b } = WirePartial::parse(&wire).unwrap() else { panic!("not masked") };
+            assert_eq!(base() * t, t_point);
+            let mut guesses = vec![s - s_a - enc_sb, s - s_a, s - enc_sb, s, s - s_a + enc_sb];
+            // the "pad" computed with only public points (no secret) is useless too
+            for dh in [vk_a, wvk_b, vk_a + wvk_b, r_b, t_point] {
+                if let Some(pad) = sb_pad(&dh, &r_b, &t_point) { guesses.push(s - s_a - (enc_sb - pad)); }
+            }
+            for g in guesses { assert_ne!(base() * g, t_point, "observer recovered t"); }
+            // a third party with its own key share cannot unmask
+            let stranger = Seller::new();
+            let q = stranger.open_partial(&wire, None).unwrap();
+            assert_ne!(extract_t(s, s_a, q.s_b), t);
+        }
+    }
+
+    #[test]
+    fn masked_partial_rejects_tampering_and_plain_v2() {
+        let mut seller = Seller::new();
+        let buyer = Buyer::new();
+        let r_a = seller.new_nonce();
+        let p = buyer.partial(r_a, seller.vk_a, Scalar::ZERO, b"h");
+        let wire = buyer.masked_partial_json(&p, seller.vk_a).unwrap();
+        let pok = buyer.prove_knowledge(seller.vk_a, b"s");
+        // relay swaps the merchant key in the wire: the unmasked s_b fails pre_sign's check
+        let mut w: PartialWire = serde_json::from_str(&wire).unwrap();
+        w.vk_b = Some(hex::encode(Buyer::new().vk_b.to_bytes()));
+        let bad = seller.open_partial(&serde_json::to_string(&w).unwrap(), None).unwrap();
+        assert!(seller.pre_sign(buyer.vk_b, &bad, b"h", b"s", &pok, Scalar::ZERO).is_err());
+        // a v2 partial that also carries s_b in the clear is refused
+        let mut w: PartialWire = serde_json::from_str(&wire).unwrap();
+        w.s_b = Some(hex::encode(p.s_b.to_repr()));
+        assert!(WirePartial::parse(&serde_json::to_string(&w).unwrap()).is_err());
+        // an identity payer key would make the pad public: refused
+        assert!(buyer.masked_partial_json(&p, <Point as group::Group>::identity()).is_err());
+        // v1 (refund) still parses
+        let plain = partial_to_plain_json(&p);
+        assert!(!WirePartial::parse(&plain).unwrap().is_masked());
+        assert_eq!(seller.open_partial(&plain, None).unwrap().s_b, p.s_b);
+    }
 }
+

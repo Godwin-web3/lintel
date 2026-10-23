@@ -293,7 +293,8 @@ function Mine({ boot, agent = {} }) {
         const next = {};
         for (const [id, s] of v1) {
           try {
-            const { listing, session } = await relay('GET', `/listings/${id}`);
+            // seller token: the relay shows the full session only to its buyer and seller
+            const { listing, session } = await relay('GET', `/listings/${id}`, undefined, s.token);
             next[id] = { listing, session, note: '' };
             if (session && session.mode === 'chain' && store.get().selling[id]?.delegated && !session.chain?.settle_txid) {
               // the seller agent runs this sale; this tab only records the payout once it settles
@@ -449,14 +450,14 @@ function Listing({ id, boot }) {
       s[0][1] = 'done'; s[1][1] = 'run'; upd();
 
       let sess = session;
-      while (!sess.partial) { await sleep(2000); sess = (await relay('GET', `/sessions/${session.id}`)).session; }
+      while (!sess.partial) { await sleep(2000); sess = (await relay('GET', `/sessions/${session.id}`, undefined, buyer_token)).session; }
       s[1][1] = 'done'; s[2][1] = 'run'; upd();
 
       const presig = await crypto('preSign', { key: session.id, merchantVk: L.merchant_vk, partial: sess.partial, sighash, sessionId: session.id, pok: sess.merchant_pok, alpha, verifiedT: verify.t });
       await relay('POST', `/sessions/${session.id}/presig`, { presig }, buyer_token);
       s[2][1] = 'done'; s[3][1] = 'run'; upd();
 
-      while (!sess.signature) { await sleep(2000); sess = (await relay('GET', `/sessions/${session.id}`)).session; }
+      while (!sess.signature) { await sleep(2000); sess = (await relay('GET', `/sessions/${session.id}`, undefined, buyer_token)).session; }
       s[3][1] = 'done'; s[4][1] = 'run'; upd();
 
       const bytes = await crypto('unlock', { key: session.id, signature: sess.signature, presig, partial: sess.partial, offer: await resolveOffer(L.offer) });

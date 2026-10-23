@@ -12,7 +12,7 @@
 
 use ff::PrimeField;
 use group::GroupEncoding;
-use lintel::protocol::{self, parse_point, parse_scalar, BuyerPartial, KnowledgeProof, PreSignature};
+use lintel::protocol::{self, parse_point, parse_scalar, KnowledgeProof, PreSignature, WirePartial};
 use lintel::sealed::{self, prove::Keys, SealedOffer, SealedOfferWire, CHUNKS};
 use pasta_curves::pallas::{Point, Scalar};
 use serde::{Deserialize, Serialize};
@@ -92,8 +92,6 @@ struct MerchantState { sk_b: String, secret: String, #[serde(default)] negated: 
 struct PayerState { sk_a: String, pending_r_a: Option<String>, negated: bool }
 #[derive(Serialize, Deserialize)]
 struct PokWire { r_point: String, s: String }
-#[derive(Serialize, Deserialize)]
-struct PartialWire { r_b: String, s_b: String, t_point: String }
 
 fn pok_to(p: &KnowledgeProof) -> String {
     serde_json::to_string(&PokWire { r_point: pt_hex(&p.r_point), s: sc_hex(&p.s) }).unwrap()
@@ -102,13 +100,11 @@ fn pok_from(j: &str) -> R<KnowledgeProof> {
     let w: PokWire = serde_json::from_str(j).map_err(|_| err("invalid proof json"))?;
     Ok(KnowledgeProof { r_point: pt(&w.r_point, "proof point")?, s: sc(&w.s, "proof scalar")? })
 }
-fn partial_to(p: &BuyerPartial) -> String {
-    serde_json::to_string(&PartialWire { r_b: pt_hex(&p.r_b), s_b: sc_hex(&p.s_b), t_point: pt_hex(&p.t_point) }).unwrap()
-}
-fn partial_from(j: &str) -> R<BuyerPartial> {
-    let w: PartialWire = serde_json::from_str(j).map_err(|_| err("invalid partial json"))?;
-    Ok(BuyerPartial { r_b: pt(&w.r_b, "R_b")?, s_b: sc(&w.s_b, "s_b")?, t_point: pt(&w.t_point, "T")? })
-}
+// Partials use the engine's wire format (`protocol::PartialWire`): the
+// settlement partial is v2, `s_b` masked to the payer, so the relay record
+// plus the mined signature never give `t`; the refund partial (T = identity)
+// is v1, in the clear.
+fn wire_partial(j: &str) -> R<WirePartial> { WirePartial::parse(j).map_err(err) }
 fn presig_from(j: &str) -> R<PreSignature> {
     serde_json::from_str(j).map_err(|_| err("invalid pre-signature json"))
 }
@@ -208,10 +204,12 @@ impl Merchant {
         Ok(protocol::verify_knowledge(p, &pok_from(pok)?, p, self.inner.vk_b, session))
     }
 
-    /// Partial signature over `sighash` given the payer's nonce point.
+    /// Partial signature over `sighash` given the payer's nonce point, with
+    /// `s_b` masked to the payer (v2 wire): safe to publish on the relay.
     pub fn partial(&self, payer_nonce: &str, payer_vk: &str, alpha: &str, sighash: &[u8]) -> R<String> {
-        let p = self.inner.partial(pt(payer_nonce, "nonce")?, peer_key(payer_vk, "payer key", self.negated)?, sc(alpha, "alpha")?, sighash);
-        Ok(partial_to(&p))
+        let vk_a = peer_key(payer_vk, "payer key", self.negated)?;
+        let p = self.inner.partial(pt(payer_nonce, "nonce")?, vk_a, sc(alpha, "alpha")?, sighash);
+        self.inner.masked_partial_json(&p, vk_a).map_err(err)
     }
 
     /// Partial for the REFUND transaction (adaptor secret fixed to zero): the
@@ -220,20 +218,20 @@ impl Merchant {
     #[wasm_bindgen(js_name = refundPartial)]
     pub fn refund_partial(&self, payer_nonce: &str, payer_vk: &str, alpha: &str, sighash: &[u8]) -> R<String> {
         let p = self.inner.refund_partial(pt(payer_nonce, "nonce")?, peer_key(payer_vk, "payer key", self.negated)?, sc(alpha, "alpha")?, sighash);
-        Ok(partial_to(&p))
+        Ok(protocol::partial_to_plain_json(&p)) // T = identity: s_b reveals nothing
     }
 
     /// Checks the payer's pre-signature before completing.
     #[wasm_bindgen(js_name = verifyPresig)]
     pub fn verify_presig(&self, presig: &str, payer_nonce: &str, partial: &str, payer_vk: &str, alpha: &str) -> R<bool> {
-        let p = partial_from(partial)?;
-        Ok(self.inner.verify_presig(&presig_from(presig)?, pt(payer_nonce, "nonce")?, p.r_b, peer_key(payer_vk, "payer key", self.negated)?, sc(alpha, "alpha")?))
+        let p = wire_partial(partial)?;
+        Ok(self.inner.verify_presig(&presig_from(presig)?, pt(payer_nonce, "nonce")?, p.r_b(), peer_key(payer_vk, "payer key", self.negated)?, sc(alpha, "alpha")?))
     }
 
     /// Completes the signature (64 bytes, hex). Broadcasting it reveals t.
     pub fn complete(&self, presig: &str, partial: &str) -> R<String> {
         let pre = presig_from(presig)?;
-        let sig = self.inner.complete(&pre, &partial_from(partial)?).ok_or_else(|| err("complete failed"))?;
+        let sig = self.inner.complete(&pre, &self.inner.open_partial(partial).map_err(err)?).ok_or_else(|| err("complete failed"))?;
         if !self.inner.verify_completed(&pre, &sig) { return Err(err("completed signature does not verify")); }
         Ok(hex::encode(sig))
     }
@@ -309,7 +307,9 @@ impl Payer {
     /// equals `verified_t` (the T returned by `verifyOffer`).
     #[wasm_bindgen(js_name = preSign)]
     pub fn pre_sign(&mut self, merchant_vk: &str, partial: &str, sighash: &[u8], session: &[u8], merchant_pok: &str, alpha: &str, verified_t: &str) -> R<String> {
-        let p = partial_from(partial)?;
+        // Unmask s_b with our share and the merchant key we trust; a v1 partial
+        // (s_b in the clear, from an older seller app) is still accepted.
+        let p = self.inner.open_partial(partial, Some(peer_key(merchant_vk, "merchant key", self.negated)?)).map_err(err)?;
         if p.t_point.to_bytes() != pt(verified_t, "T")?.to_bytes() {
             return Err(err("partial is locked to a different T than the verified offer"));
         }
@@ -324,7 +324,7 @@ impl Payer {
     /// first. Do this before broadcasting the funding transaction.
     #[wasm_bindgen(js_name = refundSign)]
     pub fn refund_sign(&mut self, merchant_vk: &str, partial: &str, sighash: &[u8], session: &[u8], merchant_pok: &str, alpha: &str) -> R<String> {
-        let p = partial_from(partial)?;
+        let p = self.inner.open_partial(partial, Some(peer_key(merchant_vk, "merchant key", self.negated)?)).map_err(err)?;
         let pre = self.inner
             .pre_sign(peer_key(merchant_vk, "merchant key", self.negated)?, &p, sighash, session, &pok_from(merchant_pok)?, sc(alpha, "alpha")?)
             .map_err(err)?;
@@ -353,7 +353,9 @@ impl Payer {
         }
         let s = parse_scalar(&hex::encode(&sig[32..])).ok_or_else(|| err("invalid s"))?;
         let s_a = sc(&pre.s_a_hex, "s_a")?;
-        let t = protocol::extract_t(s, s_a, partial_from(partial)?.s_b);
+        let p = self.inner.open_partial(partial, None).map_err(err)?;
+        let t = protocol::extract_t(s, s_a, p.s_b);
+        if Point::from_bytes(&protocol::ORCHARD_BASEPOINT).unwrap() * t != p.t_point { return Err(err("recovered secret does not match T (wrong partial or key)")); }
         if let Some(o) = big::parse(offer) { return big::open(t, &o?); }
         sealed::open(t, &offer_from(offer)?).ok_or_else(|| err("decryption failed"))
     }
@@ -385,6 +387,19 @@ mod tests {
         assert!(merchant.verify_presig(&pre, &r_a, &partial, &payer.verification_key(), &alpha).unwrap());
         let sig = merchant.complete(&pre, &partial).unwrap();
         assert_eq!(payer.unlock(&sig, &pre, &partial, &offer).unwrap(), payload.to_vec());
+
+        // What the relay stores (partial, pre-signature, final signature) does
+        // not give t to anyone else: s_b is masked to the payer.
+        let w: serde_json::Value = serde_json::from_str(&partial).unwrap();
+        assert_eq!(w["v"], 2);
+        assert!(w.get("s_b").is_none());
+        let s = sc(&sig[64..], "s").unwrap();
+        let s_a = sc(&serde_json::from_str::<serde_json::Value>(&pre).unwrap()["s_a_hex"].as_str().unwrap().to_string(), "s_a").unwrap();
+        let enc_sb = sc(w["enc_sb"].as_str().unwrap(), "enc_sb").unwrap();
+        let o = offer_from(&offer).unwrap();
+        for guess in [s - s_a - enc_sb, s - s_a, s - enc_sb, s] {
+            assert!(sealed::open(guess, &o).is_none_or(|b| b != payload.to_vec()), "outsider decrypted the offer");
+        }
     }
 }
 

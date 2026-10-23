@@ -106,9 +106,10 @@ Hardening from the review of this branch:
   identity buyer nonce; `verify_pok` rejects identity `vk_i`, `R_i`, `T_i`.
 
 What the relay stores per sale: `s_a`, `s`, `enc_sb` (and public points). It
-cannot derive `t_i` (`relay_view_does_not_reveal_t`). This also fixes a v1
-property: on v1 the relay's public session holds `s_a`, `s_b` and `s`, so anyone
-reading it can compute `t` and open the offer after the sale.
+cannot derive `t_i` (`relay_view_does_not_reveal_t`). v1 (single-copy) sessions
+used to hold `s_a`, `s_b` and `s` in the clear, so anyone reading them could
+compute `t` after the sale; they now publish `s_b` masked to the buyer the same
+way (partial wire v2, see the [Threat model](threat-model.md#after-the-sale)).
 
 UX: buyers see "waiting for the seller's device" and can close the tab; their
 purchase resumes from localStorage. Sellers' sales complete in a background

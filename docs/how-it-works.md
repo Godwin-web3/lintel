@@ -26,7 +26,7 @@ c  = H(R ‖ rk ‖ sighash)
 ```
 
 1. The buyer generates a single-use nonce inside its signer and publishes only `R_a`.
-2. The seller answers with its partial `s_b = r_b + c·sk_b` and a proof of knowledge of `sk_b` (a separate hash domain, `Lintel_PoK_v1`). It never sees `r_a`.
+2. The seller answers with its partial `s_b = r_b + c·sk_b` and a proof of knowledge of `sk_b` (a separate hash domain, `Lintel_PoK_v1`). It never sees `r_a`. The partial goes through the relay with `s_b` masked to the buyer, `enc_sb = s_b + H(sk_b·vk_a, R_b, T)` (domain `Lintel_sbmask_v1`); the buyer removes the mask with `sk_a·vk_b`, the same point. Without the mask, `s_a` and `s_b` on the relay plus `s` on chain would give `t` to anyone ([Threat model](threat-model.md#after-the-sale)).
 3. The buyer checks that proof and `s_b·G == R_b + c·vk_b`, recomputes `R` and checks `rk`, then sends its pre-signature `s_a = r_a + c·(sk_a + α)`. The nonce is consumed on use.
 4. `(R, s_a + s_b)` is **not** a valid signature: it is short by exactly `t`. Only the seller can finish it: `s = s_a + s_b + t`, which verifies under `rk`.
 5. As soon as the buyer sees `s`, it computes `t = s − s_a − s_b`.

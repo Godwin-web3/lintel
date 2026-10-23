@@ -14,13 +14,13 @@ Your browser's local storage keeps wallet spending keys, signing shares and nonc
 
 ## What the public relay stores
 
-The relay is a public bulletin board. It stores, and serves to anyone:
+The relay is a public bulletin board for listings and a mailbox for sales. It stores:
 
-- listings: title, description, price, content hash, the public point `T`, ciphertext and proofs (big files as content-addressed blobs);
-- sale records: verification keys, proofs of knowledge, key contributions, testnet addresses, agreed transaction terms, unsigned transactions, nonce points, partial and pre-signatures, and transaction ids;
+- listings, served to anyone: title, description, price, content hash, the public point `T`, ciphertext and proofs (big files as content-addressed blobs);
+- sale records: verification keys, proofs of knowledge, key contributions, testnet addresses, agreed transaction terms, unsigned transactions, nonce points, partial and pre-signatures, and transaction ids. A single-copy sale's record is served in full only to its buyer and seller (each holds a token for it); anyone else sees its stage and its funding and settlement transaction ids;
 - multi-copy orders and completions.
 
-From these fields the relay operator can derive an escrow's viewing key and see its balance and transactions; it cannot spend them. After a single-copy sale settles, anyone who reads the sale's record together with the mined settlement can compute the key that opens the content. See the [threat model](/docs/threat-model).
+From these fields the relay operator can derive an escrow's viewing key and see its balance and transactions; it cannot spend them. The seller's partial signature is stored masked to the buyer, so neither the operator nor anyone reading the chain can compute the key that opens the content. Records of sales settled before that change hold it in the clear. See the [threat model](/docs/threat-model).
 
 The relay also forwards public chain requests (block heights, commitment trees, transactions, broadcasts) to a lightwalletd server.
 
