@@ -260,7 +260,7 @@ const HEIGHT = (h) => { const n = Number(h); need(Number.isInteger(n) && n > 0 &
 
 // ---- routes ----
 const routes = [
-  ['GET', /^\/health$/, () => ({ ok: true })],
+  ['GET', /^\/health$/, () => ({ ok: true, storage: storage.kind })],
 
   // Content-addressed blobs (offer v3 parts). The name must be the SHA-256 of
   // the bytes; anything else is refused. Public data, write-once, immutable.
