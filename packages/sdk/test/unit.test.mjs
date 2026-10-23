@@ -36,6 +36,16 @@ test('listingStatus follows the on-chain session fields', () => {
   assert.equal(listingStatus(listing, { id: 's', mode: 'relay', presig: '{}', signature: 'ab' }).phase, 'settled');
   assert.equal(listingStatus({ ...listing, version: 2 }, null).phase, 'presale');
   assert.deepEqual(txids(null), {});
+  // the relay's status view (no token): stage flags and public txids only
+  const v = (stage, chain = {}, mode = 'chain') => ({ id: 's', listing_id: 'a', mode, redacted: true, stage: { partial: false, presig: false, signature: false, ...stage }, chain });
+  assert.equal(listingStatus(listing, v({})).phase, 'joined');
+  assert.equal(listingStatus(listing, v({}, { funding_txid: 'f'.repeat(64) })).phase, 'funding_broadcast');
+  assert.equal(listingStatus(listing, v({ partial: true }, { funding_txid: 'f'.repeat(64) })).phase, 'settlement_built');
+  assert.equal(listingStatus(listing, v({ partial: true, presig: true })).phase, 'presigned');
+  const vd = listingStatus(listing, v({ partial: true, presig: true }, { funding_txid: 'a'.repeat(64), settle_txid: 'b'.repeat(64) }));
+  assert.equal(vd.phase, 'settled');
+  assert.deepEqual(vd.txids, { funding: 'a'.repeat(64), settlement: 'b'.repeat(64) });
+  assert.equal(listingStatus(listing, v({ partial: true, presig: true, signature: true }, undefined, 'relay')).phase, 'settled');
 });
 
 test('FileStore writes 0600 atomically; MemoryStore round-trips', async () => {
